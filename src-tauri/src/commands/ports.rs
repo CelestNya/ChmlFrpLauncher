@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::HashSet;
 use std::process::Command;
 
 #[derive(Serialize)]
@@ -14,6 +15,23 @@ pub struct PortCheckResult {
     pub occupied: bool,
     pub pid: Option<String>,
     pub process: Option<String>,
+}
+
+fn deduplicate_ports(items: Vec<PortInfo>) -> Vec<PortInfo> {
+    let mut seen = HashSet::new();
+    let mut deduplicated = Vec::new();
+
+    for item in items {
+        let key = format!(
+            "{}|{}|{}|{}",
+            item.port, item.pid, item.process, item.protocol
+        );
+        if seen.insert(key) {
+            deduplicated.push(item);
+        }
+    }
+
+    deduplicated
 }
 
 fn collect_ports() -> Vec<PortInfo> {
@@ -56,7 +74,7 @@ fn collect_ports() -> Vec<PortInfo> {
             }
         }
 
-        result
+        deduplicate_ports(result)
     }
 
     #[cfg(target_os = "linux")]
@@ -87,7 +105,7 @@ fn collect_ports() -> Vec<PortInfo> {
             }
         }
 
-        result
+        deduplicate_ports(result)
     }
 
     #[cfg(target_os = "macos")]
@@ -116,7 +134,7 @@ fn collect_ports() -> Vec<PortInfo> {
             }
         }
 
-        result
+        deduplicate_ports(result)
     }
 }
 
