@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -11,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { NodeInfo } from "@/services/api";
+import type { PortCheckResult } from "@/services/ports";
 
 export interface TunnelFormData {
   tunnelName: string;
@@ -29,6 +31,8 @@ interface TunnelFormProps {
   onChange: (data: Partial<TunnelFormData>) => void;
   nodeInfo: NodeInfo | null;
   disabled?: boolean;
+  portStatus?: (PortCheckResult & { checking: boolean; checkedPort: string }) | null;
+  portStatusError?: string | null;
 }
 
 export function TunnelForm({
@@ -36,11 +40,13 @@ export function TunnelForm({
   onChange,
   nodeInfo,
   disabled = false,
+  portStatus = null,
+  portStatusError = null,
 }: TunnelFormProps) {
   const handleCopyNodeIp = useCallback(async (ip: string) => {
     try {
       await navigator.clipboard.writeText(ip);
-      toast.success("节点IP已复制");
+      toast.success("节点 IP 已复制");
     } catch (error) {
       console.error("Failed to copy IP:", error);
       toast.error("复制失败");
@@ -59,13 +65,16 @@ export function TunnelForm({
   const isHttpProtocol =
     formData.portType === "HTTP" || formData.portType === "HTTPS";
 
+  const currentPort = formData.localPort.trim();
+  const hasMatchedPortStatus = portStatus?.checkedPort === currentPort;
+
   return (
     <div className="flex-1 min-h-0 overflow-y-auto pr-4 transition-all duration-300 ease-in-out">
       <div className="space-y-4 pb-3">
         {nodeInfo && isHttpProtocol && (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/50">
+          <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800/50 dark:bg-blue-950/30">
             <svg
-              className="w-4 h-4 mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0"
+              className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-600 dark:text-blue-400"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -77,28 +86,28 @@ export function TunnelForm({
                 d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            <p className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
-              使用{formData.portType}隧道需要将您的{" "}
-              <span className="font-mono font-semibold">
+            <p className="text-xs leading-relaxed text-blue-700 dark:text-blue-300">
+              使用 {formData.portType} 隧道时，需要将
+              <span className="mx-1 font-mono font-semibold">
                 {formData.domain || "您的域名"}
-              </span>{" "}
-              域名通过
+              </span>
+              通过
               <button
                 type="button"
                 onClick={handleOpenCnameDoc}
-                className="underline decoration-dotted underline-offset-2 hover:decoration-solid focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded px-0.5 mx-0.5"
+                className="mx-1 rounded px-0.5 underline decoration-dotted underline-offset-2 hover:decoration-solid focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
               >
-                CNAME解析
+                CNAME 解析
               </button>
-              至{" "}
+              指向
               <button
                 type="button"
                 onClick={() => handleCopyNodeIp(nodeInfo.ip)}
-                className="font-mono font-semibold underline decoration-dotted underline-offset-2 hover:decoration-solid focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded px-0.5 cursor-pointer"
+                className="mx-1 cursor-pointer rounded px-0.5 font-mono font-semibold underline decoration-dotted underline-offset-2 hover:decoration-solid focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                 title="点击复制"
               >
                 {nodeInfo.ip}
-              </button>{" "}
+              </button>
               才能正常访问。
             </p>
           </div>
@@ -112,7 +121,7 @@ export function TunnelForm({
             id="tunnelName"
             value={formData.tunnelName}
             onChange={(e) => onChange({ tunnelName: e.target.value })}
-            placeholder="为您的隧道起个名字"
+            placeholder="为您的隧道起一个名字"
             required
             disabled={disabled}
             className="h-10 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
@@ -148,6 +157,31 @@ export function TunnelForm({
               disabled={disabled}
               className="h-10 font-mono shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
             />
+            {currentPort && (
+              <p
+                className={cn(
+                  "text-xs",
+                  portStatusError || portStatus?.occupied
+                    ? "text-destructive"
+                    : portStatus?.checking
+                      ? "text-muted-foreground"
+                      : "text-emerald-600",
+                )}
+              >
+                {portStatus?.checking && "正在检查端口占用..."}
+                {!portStatus?.checking &&
+                  !portStatusError &&
+                  hasMatchedPortStatus &&
+                  portStatus.occupied &&
+                  `端口已被占用：${portStatus.process || "未知进程"} (PID ${portStatus.pid || "未知"})`}
+                {!portStatus?.checking &&
+                  !portStatusError &&
+                  hasMatchedPortStatus &&
+                  !portStatus.occupied &&
+                  "端口当前可用"}
+                {!portStatus?.checking && portStatusError && portStatusError}
+              </p>
+            )}
           </div>
         </div>
 
@@ -202,7 +236,7 @@ export function TunnelForm({
           )}
         </div>
 
-        <Accordion type="single" collapsible className="border rounded-lg">
+        <Accordion type="single" collapsible className="rounded-lg border">
           <AccordionItem value="advanced" className="border-0">
             <AccordionTrigger className="px-4 py-3 hover:no-underline">
               <span className="text-sm font-medium">高级选项</span>
@@ -212,7 +246,7 @@ export function TunnelForm({
                 <div className="space-y-2">
                   <Label htmlFor="extraParams" className="text-sm font-medium">
                     额外参数
-                    <span className="ml-1.5 text-xs text-muted-foreground font-normal">
+                    <span className="ml-1.5 text-xs font-normal text-muted-foreground">
                       （可选）
                     </span>
                   </Label>
@@ -227,7 +261,7 @@ export function TunnelForm({
                 </div>
 
                 <div className="flex items-center gap-6">
-                  <label className="group flex items-center gap-2.5 text-sm cursor-pointer hover:text-primary transition-colors">
+                  <label className="group flex cursor-pointer items-center gap-2.5 text-sm transition-colors hover:text-primary">
                     <input
                       type="checkbox"
                       checked={formData.encryption}
@@ -235,11 +269,11 @@ export function TunnelForm({
                         onChange({ encryption: e.target.checked })
                       }
                       disabled={disabled}
-                      className="w-4 h-4 rounded border-input cursor-pointer transition-colors checked:bg-primary checked:border-primary focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                      className="h-4 w-4 cursor-pointer rounded border-input transition-colors checked:border-primary checked:bg-primary focus:ring-2 focus:ring-ring focus:ring-offset-2"
                     />
                     <span className="font-medium">加密传输</span>
                   </label>
-                  <label className="group flex items-center gap-2.5 text-sm cursor-pointer hover:text-primary transition-colors">
+                  <label className="group flex cursor-pointer items-center gap-2.5 text-sm transition-colors hover:text-primary">
                     <input
                       type="checkbox"
                       checked={formData.compression}
@@ -247,7 +281,7 @@ export function TunnelForm({
                         onChange({ compression: e.target.checked })
                       }
                       disabled={disabled}
-                      className="w-4 h-4 rounded border-input cursor-pointer transition-colors checked:bg-primary checked:border-primary focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                      className="h-4 w-4 cursor-pointer rounded border-input transition-colors checked:border-primary checked:bg-primary focus:ring-2 focus:ring-ring focus:ring-offset-2"
                     />
                     <span className="font-medium">数据压缩</span>
                   </label>

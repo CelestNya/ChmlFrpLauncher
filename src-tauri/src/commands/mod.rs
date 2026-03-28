@@ -1,20 +1,20 @@
-// 命令模块
 pub mod autostart;
 pub mod background;
 pub mod custom_tunnel;
 pub mod download;
 pub mod http;
 pub mod ping;
+pub mod ports;
 pub mod process;
 pub mod process_guard;
 pub mod tray;
 
-// 重新导出所有命令函数，方便使用
 pub use autostart::*;
 pub use background::*;
 pub use custom_tunnel::*;
 pub use download::*;
 pub use http::*;
 pub use ping::*;
+pub use ports::*;
 pub use process::*;
 pub use tray::*;
