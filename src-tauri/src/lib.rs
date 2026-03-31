@@ -228,6 +228,7 @@ pub fn run() {
             commands::get_tunnel_auto_start,
             commands::set_tunnel_auto_start,
             commands::http_request,
+            commands::http_request_raw,
             commands::hide_window,
             commands::show_window,
             commands::quit_app,

@@ -63,11 +63,16 @@ export function useUserInfo(
         setUserInfo(data);
         homePageCache.userInfo = data;
         isFirstLoadRef.current = false;
+        const currentStoredUser = getStoredUser();
         const updatedUser = {
           username: data.username,
           usergroup: data.usergroup,
           userimg: data.userimg,
           usertoken: data.usertoken,
+          accessToken: currentStoredUser?.accessToken,
+          refreshToken: currentStoredUser?.refreshToken,
+          accessTokenExpiresAt: currentStoredUser?.accessTokenExpiresAt,
+          tokenType: currentStoredUser?.tokenType,
           tunnelCount: data.tunnelCount,
           tunnel: data.tunnel,
         };

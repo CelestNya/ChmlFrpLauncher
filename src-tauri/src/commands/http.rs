@@ -1,5 +1,12 @@
 use crate::models::HttpRequestOptions;
 use reqwest::Url;
+use serde::Serialize;
+
+#[derive(Serialize)]
+pub struct HttpResponsePayload {
+    pub status: u16,
+    pub body: String,
+}
 
 fn validate_request_url(raw_url: &str) -> Result<Url, String> {
     let url = Url::parse(raw_url).map_err(|e| format!("Invalid URL: {}", e))?;
@@ -22,12 +29,12 @@ fn is_allowed_host(host: &str) -> bool {
     host == "cf-v2.uapis.cn"
         || host == "cf-v1.uapis.cn"
         || host.ends_with(".uapis.cn")
+        || host == "account-api.qzhua.net"
         || host == "chmlfrp.net"
         || host.ends_with(".chmlfrp.net")
 }
 
-#[tauri::command]
-pub async fn http_request(options: HttpRequestOptions) -> Result<String, String> {
+async fn send_request(options: HttpRequestOptions) -> Result<HttpResponsePayload, String> {
     let bypass_proxy = options.bypass_proxy.unwrap_or(true);
     let url = validate_request_url(&options.url)?;
 
@@ -35,7 +42,6 @@ pub async fn http_request(options: HttpRequestOptions) -> Result<String, String>
         .timeout(std::time::Duration::from_secs(30))
         .user_agent("ChmlFrpLauncher/1.0");
 
-    // 如果绕过代理，使用自定义代理函数返回 None 来禁用代理
     if bypass_proxy {
         client_builder = client_builder.proxy(reqwest::Proxy::custom(
             move |_url| -> Option<reqwest::Url> { None },
@@ -71,14 +77,29 @@ pub async fn http_request(options: HttpRequestOptions) -> Result<String, String>
         .map_err(|e| format!("Request failed: {}", e))?;
 
     let status = response.status();
-    let text = response
+    let body = response
         .text()
         .await
         .map_err(|e| format!("Failed to read response: {}", e))?;
 
-    if !status.is_success() {
-        return Err(format!("HTTP {}: {}", status.as_u16(), text));
+    Ok(HttpResponsePayload {
+        status: status.as_u16(),
+        body,
+    })
+}
+
+#[tauri::command]
+pub async fn http_request(options: HttpRequestOptions) -> Result<String, String> {
+    let response = send_request(options).await?;
+
+    if !(200..300).contains(&response.status) {
+        return Err(format!("HTTP {}: {}", response.status, response.body));
     }
 
-    Ok(text)
+    Ok(response.body)
+}
+
+#[tauri::command]
+pub async fn http_request_raw(options: HttpRequestOptions) -> Result<HttpResponsePayload, String> {
+    send_request(options).await
 }

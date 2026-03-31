@@ -13,8 +13,11 @@ import {
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   clearStoredUser,
-  login,
+  createDeviceAuthorization,
+  exchangeDeviceCodeForToken,
+  loginWithAccessToken,
   saveStoredUser,
+  type DeviceAuthorizationResponse,
   type StoredUser,
 } from "@/services/api";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -86,13 +89,18 @@ export function Sidebar({
   }, []);
 
   const [loginOpen, setLoginOpen] = useState(false);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [polling, setPolling] = useState(false);
   const [error, setError] = useState("");
+  const [authSession, setAuthSession] =
+    useState<DeviceAuthorizationResponse | null>(null);
+  const [authMessage, setAuthMessage] = useState(
+    "将在浏览器中打开授权页面",
+  );
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const pollingTimerRef = useRef<number | null>(null);
 
   // 点击外部关闭用户菜单
   useEffect(() => {
@@ -113,21 +121,152 @@ export function Sidebar({
     };
   }, [userMenuOpen]);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const stopPolling = () => {
+    if (pollingTimerRef.current) {
+      clearTimeout(pollingTimerRef.current);
+      pollingTimerRef.current = null;
+    }
+    setPolling(false);
+  };
+
+  const resetLoginFlow = () => {
+    stopPolling();
+    setLoading(false);
+    setError("");
+    setAuthSession(null);
+    setAuthMessage("将在浏览器中打开授权页面");
+  };
+
+  const closeLoginDialog = () => {
+    setLoginOpen(false);
+    resetLoginFlow();
+  };
+
+  const finishLogin = async (
+    accessToken: string,
+    options?: {
+      refreshToken?: string;
+      expiresIn?: number;
+      tokenType?: string;
+    },
+  ) => {
+    const authedUser = await loginWithAccessToken(accessToken, {
+      refresh_token: options?.refreshToken,
+      expires_in: options?.expiresIn,
+      token_type: options?.tokenType,
+    });
+    onUserChange(authedUser);
+    if (rememberMe) {
+      saveStoredUser(authedUser);
+    }
+    stopPolling();
+    setUserMenuOpen(false);
+    closeLoginDialog();
+  };
+
+  const scheduleTokenPolling = (deviceCode: string, intervalSeconds: number) => {
+    if (pollingTimerRef.current) {
+      clearTimeout(pollingTimerRef.current);
+    }
+
+    pollingTimerRef.current = window.setTimeout(() => {
+      void pollToken(deviceCode, intervalSeconds);
+    }, intervalSeconds * 1000);
+  };
+
+  const pollToken = async (deviceCode: string, intervalSeconds: number) => {
+    setPolling(true);
+    try {
+      const tokenResponse = await exchangeDeviceCodeForToken(deviceCode);
+
+      if (tokenResponse.access_token) {
+        await finishLogin(tokenResponse.access_token, {
+          refreshToken: tokenResponse.refresh_token,
+          expiresIn: tokenResponse.expires_in,
+          tokenType: tokenResponse.token_type,
+        });
+        return;
+      }
+
+      if (tokenResponse.error === "authorization_pending") {
+        setAuthMessage("请在浏览器中确认授权");
+        scheduleTokenPolling(deviceCode, intervalSeconds);
+        return;
+      }
+
+      if (tokenResponse.error === "slow_down") {
+        const nextInterval = intervalSeconds + 5;
+        setAuthMessage("连接受限，正在自动重试...");
+        scheduleTokenPolling(deviceCode, nextInterval);
+        return;
+      }
+
+      if (tokenResponse.error === "expired_token") {
+        stopPolling();
+        setError("这次设备授权已过期，请重新开始登录。");
+        return;
+      }
+
+      if (tokenResponse.error === "access_denied") {
+        stopPolling();
+        setError("你已取消本次授权，请重新开始登录。");
+        return;
+      }
+
+      throw new Error(
+        tokenResponse.error_description ||
+          tokenResponse.error ||
+          "获取访问令牌失败",
+      );
+    } catch (err) {
+      stopPolling();
+      setError(err instanceof Error ? err.message : "登录失败");
+    }
+  };
+
+  const openVerificationPage = async (
+    session: DeviceAuthorizationResponse | null,
+  ) => {
+    if (!session) {
+      setError("请先开始设备授权。");
+      return;
+    }
+
+    const target =
+      session.verification_uri_complete || session.verification_uri;
+
+    if (!target) {
+      setError("账户中心未返回可用的验证地址。");
+      return;
+    }
+
+    if (session.user_code) {
+      navigator.clipboard?.writeText(session.user_code).catch(() => undefined);
+    }
+
+    try {
+      await openUrl(target);
+      setAuthMessage("请在浏览器中完成授权");
+    } catch {
+      setAuthMessage("请手动打开验证页面完成授权");
+    }
+  };
+
+  const startDeviceLogin = async () => {
+    stopPolling();
     setLoading(true);
     setError("");
+    setAuthMessage("正在获取授权信息...");
+
     try {
-      const authedUser = await login(username, password);
-      onUserChange(authedUser);
-      if (rememberMe) {
-        saveStoredUser(authedUser);
-      }
-      setLoginOpen(false);
-      setUserMenuOpen(false);
-      setPassword("");
-      setError("");
+      const session = await createDeviceAuthorization();
+      setAuthSession(session);
+      await openVerificationPage(session);
+      const intervalSeconds = Math.max(Number(session.interval || 5), 1);
+      void pollToken(session.device_code, intervalSeconds);
     } catch (err) {
+      stopPolling();
+      setAuthSession(null);
       setError(err instanceof Error ? err.message : "登录失败");
     } finally {
       setLoading(false);
@@ -206,6 +345,10 @@ export function Sidebar({
         clearTimeout(animationTimeoutRef.current);
         animationTimeoutRef.current = null;
       }
+      if (pollingTimerRef.current) {
+        clearTimeout(pollingTimerRef.current);
+        pollingTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -232,111 +375,133 @@ export function Sidebar({
       onOpenChange={(open) => {
         setLoginOpen(open);
         if (!open) {
-          setError("");
+          resetLoginFlow();
         }
       }}
     >
       <DialogContent
         showCloseButton={false}
-        className="z-[10000] w-full max-w-md rounded-2xl bg-card/95 backdrop-blur-md border border-border/50 p-8 shadow-2xl data-[state=closed]:slide-out-to-bottom-4 data-[state=open]:slide-in-from-bottom-4"
+        className="z-[10000] w-full max-w-[360px] overflow-hidden rounded-2xl bg-card/95 backdrop-blur-xl border border-border/50 p-0 shadow-2xl data-[state=closed]:slide-out-to-bottom-4 data-[state=open]:slide-in-from-bottom-4"
       >
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-sm">
-              <LogIn className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-foreground">登录账号</h2>
-              <p className="text-xs text-muted-foreground">
-                登录以访问所有功能
-              </p>
-            </div>
-          </div>
+        {/* 顶部视觉区域 */}
+        <div className="relative h-24 bg-gradient-to-br from-primary/5 via-background to-background flex items-center justify-center overflow-hidden">
           <button
             type="button"
-            className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/10 transition-all duration-200 flex items-center justify-center"
-            onClick={() => setLoginOpen(false)}
+            className="absolute top-4 right-4 h-8 w-8 rounded-full bg-foreground/5 hover:bg-foreground/10 transition-colors flex items-center justify-center text-muted-foreground hover:text-foreground z-10"
+            onClick={closeLoginDialog}
           >
             <X className="w-4 h-4" />
           </button>
+          <div className="relative h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
+            <LogIn className="w-5 h-5 text-primary-foreground" />
+          </div>
         </div>
 
-        <form className="space-y-4" onSubmit={handleLogin}>
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-foreground/80 tracking-wide">
-              账户名
-            </label>
-            <input
-              className="w-full rounded-xl border border-border/50 bg-background/50 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all duration-200"
-              placeholder="请输入账户名"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-foreground/80 tracking-wide">
-              密码
-            </label>
-            <input
-              type="password"
-              className="w-full rounded-xl border border-border/50 bg-background/50 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/50 transition-all duration-200"
-              placeholder="请输入密码"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+        {/* 主体内容 */}
+        <div className="px-6 pb-6 pt-0 space-y-5">
+          <div className="text-center space-y-1">
+            <h2 className="text-lg font-semibold tracking-tight text-foreground">欢迎回来</h2>
+            <p className="text-xs text-muted-foreground">通过浏览器安全地登录你的账户</p>
           </div>
 
-          <div className="flex items-center gap-2">
+          {!authSession ? (
+            <div className="flex flex-col gap-3 pt-2">
+              <button
+                type="button"
+                disabled={loading}
+                onClick={startDeviceLogin}
+                className="w-full rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-70 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+              >
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                    正在连接...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    授权登录
+                  </span>
+                )}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <div className="flex flex-col items-center justify-center p-4 rounded-xl bg-muted/30 border border-border/50">
+                <span className="text-xs font-medium text-muted-foreground mb-1.5">你的设备码</span>
+                <span className="font-mono text-2xl font-bold tracking-widest text-foreground">
+                  {authSession.user_code || "-"}
+                </span>
+              </div>
+
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => void openVerificationPage(authSession)}
+                  className="w-full rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-medium hover:bg-primary/90 transition-all active:scale-[0.98]"
+                >
+                  在浏览器中打开授权页
+                </button>
+                {polling && (
+                  <button
+                    type="button"
+                    onClick={stopPolling}
+                    className="w-full rounded-xl border border-border bg-transparent py-2.5 text-sm font-medium text-foreground hover:bg-muted/50 transition-all active:scale-[0.98]"
+                  >
+                    取消
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground h-4">
+                {polling ? (
+                  <>
+                    <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                    等待授权完成...
+                  </>
+                ) : (
+                  <span className="text-center">{authMessage}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-2 pt-1">
             <input
               type="checkbox"
               id="rememberMe"
               checked={rememberMe}
               onChange={(e) => setRememberMe(e.target.checked)}
-              className="h-4 w-4 rounded border-border/50 text-primary focus:ring-2 focus:ring-primary/20 cursor-pointer accent-primary"
+              className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-2 focus:ring-primary/20 cursor-pointer accent-primary transition-all"
             />
             <label
               htmlFor="rememberMe"
-              className="text-xs text-foreground/80 cursor-pointer select-none"
+              className="text-xs text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
             >
-              保存登录（重启后无需重新登录）
+              保持登录状态
             </label>
           </div>
 
           {error && (
-            <div className="rounded-xl bg-destructive/10 border border-destructive/20 px-4 py-3 animate-in fade-in slide-in-from-top-1 duration-200">
-              <p className="text-xs text-destructive font-medium">{error}</p>
+            <div className="rounded-xl bg-destructive/10 border border-destructive/20 px-3 py-2.5 animate-in fade-in zoom-in-95 duration-200">
+              <p className="text-xs text-center text-destructive font-medium">{error}</p>
             </div>
           )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl bg-primary text-primary-foreground py-3 text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-200 shadow-sm hover:shadow-md active:scale-[0.98] mt-6"
-          >
-            {loading ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                登录中...
-              </span>
-            ) : (
-              "立即登录"
-            )}
-          </button>
-        </form>
-
-        <div className="mt-6 pt-4 border-t border-border/30">
-          <p className="text-xs text-center text-muted-foreground">
-            还没有账号？{" "}
-            <button
-              onClick={() => openUrl("https://www.chmlfrp.net")}
-              className="text-primary font-medium hover:underline"
-            >
-              立即注册
-            </button>
-          </p>
         </div>
+
+        {/* 底部链接 */}
+        {!authSession && (
+          <div className="px-6 py-3 bg-muted/20 border-t border-border/50">
+            <p className="text-xs text-center text-muted-foreground">
+              还没有账号？{" "}
+              <button
+                onClick={() => openUrl("https://www.chmlfrp.net")}
+                className="text-primary font-medium hover:underline transition-all"
+              >
+                立即注册
+              </button>
+            </p>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
