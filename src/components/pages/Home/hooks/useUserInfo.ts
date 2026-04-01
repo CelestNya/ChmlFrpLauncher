@@ -77,13 +77,22 @@ export function useUserInfo(
           tunnel: data.tunnel,
         };
         saveStoredUser(updatedUser);
+        onUserChangeRef.current?.(updatedUser);
       } catch (err) {
-        clearStoredUser();
-        setUserInfo(null);
-        homePageCache.userInfo = null;
-        homePageCache.flowData = [];
-        homePageCache.signInInfo = null;
-        onUserChangeRef.current?.(null);
+        const message = err instanceof Error ? err.message : "";
+        const currentStoredUser = getStoredUser();
+        if (
+          !currentStoredUser ||
+          message.includes("登录信息已过期") ||
+          message.includes("invalid_grant")
+        ) {
+          clearStoredUser();
+          setUserInfo(null);
+          homePageCache.userInfo = null;
+          homePageCache.flowData = [];
+          homePageCache.signInInfo = null;
+          onUserChangeRef.current?.(null);
+        }
         console.error("获取用户信息失败", err);
       }
     };
