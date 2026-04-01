@@ -570,17 +570,12 @@ export async function fetchUserInfo(token?: string): Promise<UserInfo> {
     ? toBearerHeader(accessToken)
     : toBearerHeader(legacyToken!);
 
-  try {
-    const data = await request<UserInfo>("/userinfo", {
-      headers: { authorization },
-    });
+  const data = await request<UserInfo>("/userinfo", {
+    headers: { authorization },
+  });
 
-    if (data) return data as UserInfo;
-    throw new Error("获取用户信息失败");
-  } catch (err) {
-    clearStoredUser();
-    throw err;
-  }
+  if (data) return data as UserInfo;
+  throw new Error("获取用户信息失败");
 }
 
 export async function fetchSignInInfo(token?: string): Promise<SignInInfo> {
