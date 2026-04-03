@@ -2,6 +2,12 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+use std::collections::HashMap;
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 #[derive(Serialize)]
 pub struct PortInfo {
     pub port: String,
@@ -16,6 +22,9 @@ pub struct PortCheckResult {
     pub pid: Option<String>,
     pub process: Option<String>,
 }
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 fn deduplicate_ports(items: Vec<PortInfo>) -> Vec<PortInfo> {
     let mut seen = HashSet::new();
@@ -45,43 +54,62 @@ fn deduplicate_ports(items: Vec<PortInfo>) -> Vec<PortInfo> {
     deduplicated
 }
 
+#[cfg(target_os = "windows")]
+fn run_hidden_command(program: &str, args: &[&str]) -> Option<String> {
+    let mut command = Command::new(program);
+    command.args(args).creation_flags(CREATE_NO_WINDOW);
+
+    let output = command.output().ok()?;
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(target_os = "windows")]
+fn parse_tasklist_processes(tasklist_text: &str) -> HashMap<String, String> {
+    tasklist_text
+        .lines()
+        .filter_map(|line| {
+            let columns: Vec<&str> = line.trim().trim_matches('"').split("\",\"").collect();
+            if columns.len() < 2 {
+                return None;
+            }
+
+            Some((columns[1].to_string(), columns[0].to_string()))
+        })
+        .collect()
+}
+
 fn collect_ports() -> Vec<PortInfo> {
     #[cfg(target_os = "windows")]
     {
-        let netstat = Command::new("cmd")
-            .args(["/C", "netstat -ano | findstr LISTENING"])
-            .output()
-            .expect("failed to execute netstat");
-        let netstat_text = String::from_utf8_lossy(&netstat.stdout);
-
-        let tasklist = Command::new("cmd")
-            .args(["/C", "tasklist /FO CSV /NH"])
-            .output()
-            .expect("failed to execute tasklist");
-        let tasklist_text = String::from_utf8_lossy(&tasklist.stdout);
+        let netstat_text = run_hidden_command("netstat", &["-ano"]).unwrap_or_default();
+        let tasklist_text =
+            run_hidden_command("tasklist", &["/FO", "CSV", "/NH"]).unwrap_or_default();
+        let processes = parse_tasklist_processes(&tasklist_text);
 
         let mut result = Vec::new();
 
-        for line in netstat_text.lines() {
+        for line in netstat_text.lines().skip(4) {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 5 {
-                let address = parts[1];
-                let pid = parts[4];
-                if let Some(port) = address.split(':').last() {
-                    let process_name = tasklist_text
-                        .lines()
-                        .find(|l| l.contains(pid))
-                        .and_then(|l| l.split(',').next())
-                        .unwrap_or("")
-                        .trim_matches('"');
+            if parts.is_empty() {
+                continue;
+            }
 
-                    result.push(PortInfo {
-                        port: port.to_string(),
-                        pid: pid.to_string(),
-                        process: process_name.to_string(),
-                        protocol: parts[0].to_string(),
-                    });
-                }
+            let protocol = parts[0];
+            let (address, pid) = match protocol {
+                "TCP" if parts.len() >= 5 && parts[3] == "LISTENING" => (parts[1], parts[4]),
+                "UDP" if parts.len() >= 4 => (parts[1], parts[3]),
+                _ => continue,
+            };
+
+            if let Some(port) = address.split(':').last() {
+                let process_name = processes.get(pid).cloned().unwrap_or_default();
+
+                result.push(PortInfo {
+                    port: port.to_string(),
+                    pid: pid.to_string(),
+                    process: process_name,
+                    protocol: protocol.to_string(),
+                });
             }
         }
 
