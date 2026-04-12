@@ -157,7 +157,21 @@ export function TunnelCard({
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [mousePosition, closeMenu]);
+  
+  useEffect(() => {
+    if (!mousePosition) return;
 
+    const preventScroll = (e: WheelEvent) => e.preventDefault();
+    const preventTouch = (e: TouchEvent) => e.preventDefault();
+
+    document.addEventListener("wheel", preventScroll, { passive: false });
+    document.addEventListener("touchmove", preventTouch, { passive: false });
+
+    return () => {
+      document.removeEventListener("wheel", preventScroll);
+      document.removeEventListener("touchmove", preventTouch);
+    };
+  }, [mousePosition]);
   const MENU_WIDTH = 160;
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
