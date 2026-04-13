@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import { ContextMenuSeparator } from "@/components/ui/context-menu";
 import {
@@ -8,6 +9,7 @@ import {
   TooltipTrigger,
   TooltipProvider,
 } from "@/components/ui/tooltip";
+import { Play, Pencil, Trash2 } from "lucide-react";
 import { deleteTunnel } from "@/services/api";
 import { customTunnelService } from "@/services/customTunnelService";
 import { autoStartTunnelsService } from "@/services/autoStartTunnelsService";
@@ -22,6 +24,78 @@ interface TunnelCardProps {
   onToggle: (tunnel: UnifiedTunnel, enabled: boolean) => void;
   onRefresh: () => void;
   onEdit?: (tunnel: UnifiedTunnel) => void;
+}
+
+function ShortcutBar({
+  onAutoStart,
+  onEdit,
+  onDelete,
+  autoStartEnabled,
+}: {
+  onAutoStart: () => void;
+  onEdit?: () => void;
+  onDelete: () => void;
+  autoStartEnabled: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <TooltipProvider delayDuration={300}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAutoStart();
+              }}
+              className={cn(
+                "w-6 h-6 rounded flex items-center justify-center transition-colors",
+                autoStartEnabled
+                  ? "text-primary bg-primary/10"
+                  : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/60",
+              )}
+            >
+              <Play className="w-3 h-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            {autoStartEnabled ? "已启用自动启动" : "自动启动"}
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit?.();
+              }}
+              className="hidden sm:flex w-6 h-6 rounded items-center justify-center text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+            >
+              <Pencil className="w-3 h-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            编辑隧道
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              className="hidden md:flex w-6 h-6 rounded items-center justify-center text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-colors"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            删除隧道
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  );
 }
 
 export function TunnelCard({
@@ -235,6 +309,12 @@ export function TunnelCard({
     }
   };
 
+  const shortcutBarHandlers = {
+    onAutoStart: handleToggleAutoStart,
+    onEdit: onEdit ? () => onEdit(tunnel) : undefined,
+    onDelete: handleDelete,
+  };
+
   return (
     <div onContextMenu={handleContextMenu} className="group rounded-lg overflow-hidden transition-all bg-card">
       <div className="w-full bg-muted/20">
@@ -250,7 +330,7 @@ export function TunnelCard({
         />
       </div>
       <div className="p-4">
-        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-start justify-between mb-4">
           <div className="flex-1 min-w-0 pr-3">
             <div className="flex items-center gap-2 mb-1.5">
               <h3 className="font-semibold text-foreground truncate text-sm">
@@ -277,44 +357,52 @@ export function TunnelCard({
               </span>
             </div>
           </div>
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={isRunning}
-                    disabled={isToggling || isIpv6Blocked || isNodeOffline}
-                    onChange={(e) => onToggle(tunnel, e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div
-                    className={`w-9 h-5 rounded-full peer transition-colors duration-300 ${
-                      isRunning
-                        ? "bg-foreground"
-                        : "bg-muted dark:bg-foreground/12"
-                    } ${isToggling || isIpv6Blocked || isNodeOffline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                  ></div>
-                  <div
-                    className={`absolute left-[2px] top-[3px] w-3.5 h-3.5 bg-background rounded-full shadow-sm transition-transform duration-300 ${
-                      isRunning ? "translate-x-[18px]" : ""
-                    } ${isToggling || isIpv6Blocked || isNodeOffline ? "scale-90" : ""}`}
-                  ></div>
-                </label>
-              </TooltipTrigger>
-              {isNodeOffline ? (
-                <TooltipContent side="top" className="text-xs">
-                  此节点已离线
-                </TooltipContent>
-              ) : (
-                isIpv6Blocked && (
-                <TooltipContent side="top" className="text-xs">
-                  此节点无IPV6，您的网络仅支持IPV6
-                </TooltipContent>
-                )
-              )}
-            </Tooltip>
-          </TooltipProvider>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {onEdit && (
+              <ShortcutBar
+                {...shortcutBarHandlers}
+                autoStartEnabled={autoStartEnabled}
+              />
+            )}
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isRunning}
+                      disabled={isToggling || isIpv6Blocked || isNodeOffline}
+                      onChange={(e) => onToggle(tunnel, e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div
+                      className={`w-9 h-5 rounded-full peer transition-colors duration-300 ${
+                        isRunning
+                          ? "bg-foreground"
+                          : "bg-muted dark:bg-foreground/12"
+                      } ${isToggling || isIpv6Blocked || isNodeOffline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                    ></div>
+                    <div
+                      className={`absolute left-[2px] top-[3px] w-3.5 h-3.5 bg-background rounded-full shadow-sm transition-transform duration-300 ${
+                        isRunning ? "translate-x-[18px]" : ""
+                      } ${isToggling || isIpv6Blocked || isNodeOffline ? "scale-90" : ""}`}
+                    ></div>
+                  </label>
+                </TooltipTrigger>
+                {isNodeOffline ? (
+                  <TooltipContent side="top" className="text-xs">
+                    此节点已离线
+                  </TooltipContent>
+                ) : (
+                  isIpv6Blocked && (
+                  <TooltipContent side="top" className="text-xs">
+                    此节点无IPV6，您的网络仅支持IPV6
+                  </TooltipContent>
+                  )
+                )}
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </div>
 
         <div className="space-y-2.5 pt-2">

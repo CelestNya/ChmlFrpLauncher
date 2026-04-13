@@ -275,6 +275,7 @@ export function TunnelList({ user }: TunnelListProps) {
         onSuccess={refreshTunnels}
         tunnel={editingTunnel}
         preloadedNodes={preloadedEditNodes}
+        user={user}
       />
 
       <EditCustomTunnelDialog

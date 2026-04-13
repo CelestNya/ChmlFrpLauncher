@@ -9,28 +9,62 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { getStoredUser, type Node } from "@/services/api";
+import { cn } from "@/lib/utils";
+import type { Node, StoredUser } from "@/services/api";
 import { toast } from "sonner";
 
 interface NodeSelectorProps {
   nodes: Node[];
   loading: boolean;
   onNodeSelect: (node: Node) => void;
+  user?: StoredUser | null;
+}
+
+function NodeFeatureTags({ node }: { node: Node }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {node.web === "yes" && (
+        <span className="text-[8px] px-1 py-0.5 rounded bg-orange-500/10 text-orange-600 dark:text-orange-400 font-medium leading-none">
+          建站
+        </span>
+      )}
+      {node.udp === "true" && (
+        <span className="text-[8px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium leading-none">
+          UDP
+        </span>
+      )}
+      {node.fangyu === "true" && (
+        <span className="text-[8px] px-1 py-0.5 rounded bg-green-500/10 text-green-600 dark:text-green-400 font-medium leading-none">
+          防御
+        </span>
+      )}
+    </div>
+  );
 }
 
 export function NodeSelector({
   nodes,
   loading,
   onNodeSelect,
+  user,
 }: NodeSelectorProps) {
-  // 按节点组分组
-  const vipNodes = nodes.filter((node) => node.nodegroup === "vip");
-  const userNodes = nodes.filter((node) => node.nodegroup === "user");
-
-  // 根据用户权限确定默认展开的 Accordion 项
-  const user = getStoredUser();
   const isFreeUser = user?.usergroup === "免费用户";
-  const defaultOpenValues = isFreeUser ? ["user"] : ["vip", "user"];
+
+  // 看用户是不是vip 是的话优先显示vip节点 不是的话优先显示普通节点
+  const vipNodes = nodes
+    .filter((node) => node.nodegroup === "vip")
+    .sort((a, b) => {
+      if (!isFreeUser) return 0;
+      return a.id - b.id;
+    });
+  const userNodes = nodes
+    .filter((node) => node.nodegroup === "user")
+    .sort((a, b) => {
+      if (isFreeUser) return 0;
+      return a.id - b.id;
+    });
+
+  const defaultOpenValues = isFreeUser ? ["user"] : ["vip"];
 
   const handleNodeSelect = (node: Node) => {
     if (isFreeUser && node.nodegroup === "vip") {
@@ -40,6 +74,70 @@ export function NodeSelector({
     onNodeSelect(node);
   };
 
+  const renderNodeCard = (node: Node, isVip: boolean) => (
+    <Tooltip key={node.id}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => handleNodeSelect(node)}
+          disabled={loading}
+          className={cn(
+            "group relative px-3 pt-2.5 pb-3 border rounded-xl transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed",
+            isVip
+              ? "border-primary/30 hover:border-primary hover:bg-primary/5"
+              : "border-border/60 hover:border-primary hover:bg-accent/50",
+          )}
+        >
+          {isVip && (
+            <div className="absolute top-1.5 right-1.5">
+              <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-400/40 text-amber-600 dark:text-amber-400 font-semibold leading-none">
+                VIP
+              </span>
+            </div>
+          )}
+          <div className="relative space-y-1">
+            <span className="block text-[10px] text-muted-foreground font-medium leading-tight">
+              #{node.id}
+            </span>
+            <h4
+              className={cn(
+                "font-semibold text-sm transition-colors leading-snug pr-8",
+                isVip
+                  ? "group-hover:text-primary"
+                  : "group-hover:text-primary",
+              )}
+            >
+              {node.name}
+            </h4>
+            <NodeFeatureTags node={node} />
+          </div>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[240px] text-pretty">
+        <div className="space-y-1">
+          {node.notes && (
+            <p className="text-xs leading-snug">{node.notes}</p>
+          )}
+          <div className="flex gap-2 text-[10px] whitespace-nowrap">
+            <span
+              className={node.fangyu === "true" ? "opacity-100" : "opacity-40"}
+            >
+              {node.fangyu === "true" ? "✓" : "✗"} 防御
+            </span>
+            <span className={node.udp === "true" ? "opacity-100" : "opacity-40"}>
+              {node.udp === "true" ? "✓" : "✗"} UDP
+            </span>
+            <span
+              className={node.web === "yes" ? "opacity-100" : "opacity-40"}
+            >
+              {node.web === "yes" ? "✓" : "✗"} 建站
+            </span>
+          </div>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+
   return (
     <div className="flex-1 min-h-0 overflow-y-auto pr-4">
       <Accordion
@@ -47,7 +145,7 @@ export function NodeSelector({
         defaultValue={defaultOpenValues}
         className="space-y-3"
       >
-        {vipNodes.length > 0 && (
+        {vipNodes.length > 0 && !isFreeUser && (
           <AccordionItem value="vip" className="border-0">
             <AccordionTrigger className="py-2 hover:no-underline">
               <div className="flex items-center gap-3 w-full">
@@ -63,63 +161,7 @@ export function NodeSelector({
             </AccordionTrigger>
             <AccordionContent className="pt-2">
               <div className="grid grid-cols-3 gap-3">
-                {vipNodes.map((node) => (
-                  <Tooltip key={node.id}>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => handleNodeSelect(node)}
-                        disabled={loading}
-                        className="group relative px-3 pt-2.5 pb-3 border border-border/60 rounded-xl hover:border-primary hover:bg-accent/50 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-primary/0 to-primary/0 group-hover:from-primary/5 group-hover:to-transparent transition-all" />
-                        <div className="relative space-y-1">
-                          <span className="block text-[10px] text-muted-foreground font-medium leading-tight">
-                            #{node.id}
-                          </span>
-                          <h4 className="font-semibold text-sm group-hover:text-primary transition-colors leading-snug">
-                            {node.name}
-                          </h4>
-                        </div>
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="top"
-                      className="max-w-[240px] text-pretty"
-                    >
-                      <div className="space-y-1">
-                        {node.notes && (
-                          <p className="text-xs leading-snug">{node.notes}</p>
-                        )}
-                        <div className="flex gap-2 text-[10px] whitespace-nowrap">
-                          <span
-                            className={
-                              node.fangyu === "true"
-                                ? "opacity-100"
-                                : "opacity-40"
-                            }
-                          >
-                            {node.fangyu === "true" ? "✓" : "✗"} 防御
-                          </span>
-                          <span
-                            className={
-                              node.udp === "true" ? "opacity-100" : "opacity-40"
-                            }
-                          >
-                            {node.udp === "true" ? "✓" : "✗"} UDP
-                          </span>
-                          <span
-                            className={
-                              node.web === "yes" ? "opacity-100" : "opacity-40"
-                            }
-                          >
-                            {node.web === "yes" ? "✓" : "✗"} 建站
-                          </span>
-                        </div>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
+                {vipNodes.map((node) => renderNodeCard(node, true))}
               </div>
             </AccordionContent>
           </AccordionItem>
@@ -131,7 +173,9 @@ export function NodeSelector({
               <div className="flex items-center gap-3 w-full">
                 <div className="flex items-center gap-2">
                   <div className="w-1 h-5 bg-gradient-to-b from-primary/60 to-primary/80 rounded-full" />
-                  <h3 className="text-sm font-semibold">非会员节点</h3>
+                  <h3 className="text-sm font-semibold">
+                    {isFreeUser ? "可用节点" : "普通节点"}
+                  </h3>
                 </div>
                 <div className="flex-1 h-px bg-gradient-to-r from-border to-transparent" />
                 <span className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-md">
@@ -141,63 +185,7 @@ export function NodeSelector({
             </AccordionTrigger>
             <AccordionContent className="pt-2">
               <div className="grid grid-cols-3 gap-3">
-                {userNodes.map((node) => (
-                  <Tooltip key={node.id}>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => handleNodeSelect(node)}
-                        disabled={loading}
-                        className="group relative px-3 pt-2.5 pb-3 border border-border/60 rounded-xl hover:border-primary hover:bg-accent/50 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-primary/0 to-primary/0 group-hover:from-primary/5 group-hover:to-transparent transition-all" />
-                        <div className="relative space-y-1">
-                          <span className="block text-[10px] text-muted-foreground font-medium leading-tight">
-                            #{node.id}
-                          </span>
-                          <h4 className="font-semibold text-sm group-hover:text-primary transition-colors leading-snug">
-                            {node.name}
-                          </h4>
-                        </div>
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="top"
-                      className="max-w-[240px] text-pretty"
-                    >
-                      <div className="space-y-1">
-                        {node.notes && (
-                          <p className="text-xs leading-snug">{node.notes}</p>
-                        )}
-                        <div className="flex gap-2 text-[10px] whitespace-nowrap">
-                          <span
-                            className={
-                              node.fangyu === "true"
-                                ? "opacity-100"
-                                : "opacity-40"
-                            }
-                          >
-                            {node.fangyu === "true" ? "✓" : "✗"} 防御
-                          </span>
-                          <span
-                            className={
-                              node.udp === "true" ? "opacity-100" : "opacity-40"
-                            }
-                          >
-                            {node.udp === "true" ? "✓" : "✗"} UDP
-                          </span>
-                          <span
-                            className={
-                              node.web === "yes" ? "opacity-100" : "opacity-40"
-                            }
-                          >
-                            {node.web === "yes" ? "✓" : "✗"} 建站
-                          </span>
-                        </div>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
+                {userNodes.map((node) => renderNodeCard(node, false))}
               </div>
             </AccordionContent>
           </AccordionItem>

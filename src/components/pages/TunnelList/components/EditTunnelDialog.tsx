@@ -30,6 +30,7 @@ interface EditTunnelDialogProps {
   onSuccess: () => void;
   tunnel: Tunnel | null;
   preloadedNodes: Node[] | null;
+  user?: StoredUser | null;
 }
 
 type PortStatus = PortCheckResult & {
@@ -43,6 +44,7 @@ export function EditTunnelDialog({
   onSuccess,
   tunnel,
   preloadedNodes,
+  user,
 }: EditTunnelDialogProps) {
   const [step, setStep] = useState<1 | 2 | 3>(3); // 编辑隧道默认从步骤3开始
   const [loading, setLoading] = useState(false);
@@ -416,8 +418,9 @@ export function EditTunnelDialog({
           >
             <NodeSelector
               nodes={nodes}
-              loading={loadingNodeInfo}
               onNodeSelect={handleNodeSelect}
+              user={user}
+              loading={false}
             />
           </div>
         ) : step === 2 ? (

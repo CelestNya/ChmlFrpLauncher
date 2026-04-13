@@ -61,6 +61,7 @@ function DialogContent({
           "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-11/12 translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 outline-none sm:w-3/4 sm:max-w-lg md:max-w-2xl lg:max-w-4xl xl:max-w-6xl",
           className,
         )}
+        aria-describedby={undefined}
         {...props}
       >
         {children}
