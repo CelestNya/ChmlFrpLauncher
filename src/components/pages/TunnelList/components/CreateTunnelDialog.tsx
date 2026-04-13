@@ -404,6 +404,12 @@ export function CreateTunnelDialog({
                 {step === 3 && "配置隧道"}
               </DialogTitle>
 
+              {step === 1 && (
+                  <DialogDescription className="animate-in fade-in text-sm duration-300" key="desc-step1">
+                    选择节点后配置隧道参数
+                  </DialogDescription>
+              )}
+
               {step === 2 && selectedNode && (
                   <DialogDescription className="animate-in fade-in text-sm duration-300" key="desc-step2">
                     {selectedNode.name} - 查看节点详细信息
@@ -439,7 +445,7 @@ export function CreateTunnelDialog({
                       </Tabs>
                   )}
 
-                  <NodeSelector nodes={nodes} loading={loadingNodeInfo} onNodeSelect={handleNodeSelect} />
+                  <NodeSelector nodes={nodes} onNodeSelect={handleNodeSelect} user={user} loading={false} />
                 </div>
             ) : step === 2 ? (
                 <div
