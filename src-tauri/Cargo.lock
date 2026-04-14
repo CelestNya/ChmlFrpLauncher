@@ -9,6 +9,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "hex",
+ "libc",
  "log",
  "reqwest",
  "serde",
