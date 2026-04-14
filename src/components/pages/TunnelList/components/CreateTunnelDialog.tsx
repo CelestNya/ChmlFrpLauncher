@@ -50,7 +50,7 @@ export function CreateTunnelDialog({
   const [loading, setLoading] = useState(false);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [nodeInfo, setNodeInfo] = useState<NodeInfo | null>(null);
-  const [loadingNodeInfo, setLoadingNodeInfo] = useState(false);
+  const [, setLoadingNodeInfo] = useState(false);
   const [pingLatency, setPingLatency] = useState<number | null>(null);
   const [pinging, setPinging] = useState(false);
   const [pingError, setPingError] = useState(false);

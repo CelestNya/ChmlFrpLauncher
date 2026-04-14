@@ -24,65 +24,44 @@ import { toast } from "sonner";
 import { BackgroundLayer } from "@/components/App/components/BackgroundLayer";
 import { getInitialSidebarMode } from "@/components/pages/Settings/utils";
 import type { SidebarMode } from "@/components/pages/Settings/types";
+import { cn } from "@/lib/utils";
 
 function App() {
   const [activeTab, setActiveTab] = useState("home");
   const [user, setUser] = useState<StoredUser | null>(() => getStoredUser());
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
-  const initialSidebarMode = getInitialSidebarMode();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() =>
-    initialSidebarMode !== "classic",
-  );
-  const isMacOS =
-    typeof navigator !== "undefined" &&
-    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-  const isWindows =
-    typeof navigator !== "undefined" &&
-    navigator.platform.toUpperCase().indexOf("WIN") >= 0;
-
-  // Hooks
-  useAppTheme();
-  const { showCloseConfirmDialog, setShowCloseConfirmDialog } =
-    useWindowEvents();
-  const { showTitleBar } = useTitleBar();
-
-  const shouldShowTitleBar = isMacOS
-    ? showTitleBar
-    : isWindows
-      ? showTitleBar
-      : true;
-  const isTitleBarHidden = (isMacOS || isWindows) && !showTitleBar;
-  const shouldPadTop = shouldShowTitleBar || (isWindows && !showTitleBar);
-  const SIDEBAR_LEFT = isMacOS && !showTitleBar ? 10 : 15; // px
-  const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
   const appContainerRef = useRef<HTMLDivElement>(null);
-  const {
-    backgroundImage,
-    imageSrc,
-    overlayOpacity,
-    blur,
-    effectType,
-    videoLoadError,
-    videoRef,
-    videoStartSound,
-    videoVolume,
-    videoSrc,
-    backgroundType,
-    getBackgroundColorWithOpacity,
-  } = useBackground();
 
+  // 核心背景 Hook (现在处于顶层，计时器不会随页面切换停止)
+  const bg = useBackground();
+
+  // 布局与系统环境判断
+  const initialSidebarMode = getInitialSidebarMode();
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => initialSidebarMode);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => initialSidebarMode !== "classic");
+
+  const isMacOS = typeof navigator !== "undefined" && navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+  const isWindows = typeof navigator !== "undefined" && navigator.platform.toUpperCase().indexOf("WIN") >= 0;
+
+  // 其他功能 Hooks
+  useAppTheme();
   useAppInitialization();
   useDeepLink(user, setUser);
   useStartupAutoStartTunnels(user);
   useTunnelNotifications(activeTab);
+  const { showCloseConfirmDialog, setShowCloseConfirmDialog } = useWindowEvents();
+  const { showTitleBar } = useTitleBar();
   const { updateInfo, setUpdateInfo } = useUpdateCheck();
   const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
-  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() =>
-    initialSidebarMode,
-  );
 
+  // 常量计算
+  const shouldShowTitleBar = isMacOS ? showTitleBar : isWindows ? showTitleBar : true;
+  const isTitleBarHidden = (isMacOS || isWindows) && !showTitleBar;
+  const shouldPadTop = shouldShowTitleBar || (isWindows && !showTitleBar);
+  const SIDEBAR_LEFT = isMacOS && !showTitleBar ? 10 : 15;
+  const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
+
+  // 主题与更新监听
   useEffect(() => {
     const handleSidebarModeChange = () => {
       const nextMode = getInitialSidebarMode();
@@ -90,262 +69,161 @@ function App() {
       setSidebarCollapsed(nextMode !== "classic");
     };
     window.addEventListener("sidebarModeChanged", handleSidebarModeChange);
-    return () =>
-      window.removeEventListener("sidebarModeChanged", handleSidebarModeChange);
+    return () => window.removeEventListener("sidebarModeChanged", handleSidebarModeChange);
   }, []);
 
   useEffect(() => {
     const loadUserInfo = async () => {
-      const storedUser = getStoredUser();
-      if (!storedUser?.usertoken) {
-        setUserInfo(null);
-        return;
-      }
-
-      try {
-        const data = await fetchUserInfo();
-        setUserInfo(data);
-      } catch {
-        setUserInfo(null);
-      }
+      if (!user?.usertoken) { setUserInfo(null); return; }
+      try { const data = await fetchUserInfo(); setUserInfo(data); } catch { setUserInfo(null); }
     };
     void loadUserInfo();
   }, [user?.usertoken]);
 
-  useEffect(() => {
-    if (user === null) {
-      setUserInfo(null);
-    }
-  }, [user]);
-
-  const handleTabChange = (tab: string) => {
-    setActiveTab(tab);
-  };
-
+  // 内容渲染与事件处理
   const content = useMemo(() => {
     switch (activeTab) {
-      case "home":
-        return <Home user={user} onUserChange={setUser} />;
-      case "tunnels":
-        return <TunnelList user={user} />;
-      case "logs":
-        return <Logs />;
-      case "settings":
-        return <Settings />;
-      default:
-        return <Home user={user} onUserChange={setUser} />;
+      case "home": return <Home user={user} onUserChange={setUser} />;
+      case "tunnels": return <TunnelList user={user} />;
+      case "logs": return <Logs />;
+      case "settings": return <Settings />;
+      default: return <Home user={user} onUserChange={setUser} />;
     }
   }, [activeTab, user]);
 
-  const backgroundStyle = useMemo(() => {
-    if (!backgroundImage) {
-      return { backgroundColor: getBackgroundColorWithOpacity(100) };
-    }
-    return {};
-  }, [backgroundImage, getBackgroundColorWithOpacity]);
-
-  const handleVideoError = () => {};
-
   const handleVideoLoadedData = useCallback(() => {
-    if (videoRef.current) {
-      videoRef.current.volume = videoVolume / 100;
-      videoRef.current.play().catch(() => {});
+    if (bg.videoRef.current) {
+      bg.videoRef.current.volume = bg.videoVolume / 100;
+      bg.videoRef.current.play().catch(() => {});
     }
-  }, [videoRef, videoVolume]);
+  }, [bg.videoRef, bg.videoVolume]);
+
+  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   const handleUpdate = useCallback(async () => {
     if (!updateInfo) return;
-
     setIsDownloadingUpdate(true);
     setDownloadProgress(0);
-
     try {
-      await updateService.installUpdate((progress) => {
-        setDownloadProgress(progress);
-      });
-      toast.success("更新已下载完成，应用将在重启后更新", {
-        duration: 5000,
-      });
+      await updateService.installUpdate((p) => setDownloadProgress(p));
+      toast.success("更新已下载完成，重启后生效");
       setUpdateInfo(null);
-      setIsDownloadingUpdate(false);
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      toast.error(`下载更新失败: ${errorMsg}`, {
-        duration: 5000,
-      });
+    } catch (e) {
+      toast.error(`更新失败: ${String(e)}`);
+    } finally {
       setIsDownloadingUpdate(false);
     }
   }, [updateInfo, setUpdateInfo]);
 
-  const handleCloseUpdateDialog = useCallback(() => {
-    if (!isDownloadingUpdate) {
-      setUpdateInfo(null);
-    }
-  }, [isDownloadingUpdate, setUpdateInfo]);
-
   return (
-    <>
-      <div
-        ref={appContainerRef}
-        className={`flex flex-col h-screen w-screen overflow-hidden text-foreground ${
-          backgroundImage && effectType === "frosted"
-            ? "frosted-glass-enabled"
-            : ""
-        } ${
-          backgroundImage && effectType === "translucent"
-            ? "translucent-enabled"
-            : ""
-        }`}
-        style={{
-          ...backgroundStyle,
-          borderRadius: "0",
-          overflow: "hidden",
-          position: "relative",
-        }}
-      >
-        <BackgroundLayer
-          backgroundImage={backgroundImage}
-          imageSrc={imageSrc}
-          backgroundType={backgroundType}
-          videoSrc={videoSrc}
-          videoLoadError={videoLoadError}
-          videoRef={videoRef}
-          videoStartSound={videoStartSound}
-          overlayOpacity={overlayOpacity}
-          blur={blur}
-          getBackgroundColorWithOpacity={getBackgroundColorWithOpacity}
-          appContainerRef={appContainerRef}
-          onVideoError={handleVideoError}
-          onVideoLoadedData={handleVideoLoadedData}
-        />
-        {shouldShowTitleBar && (
-          <div className="relative z-50">
-            <TitleBar />
-          </div>
-        )}
-        {isWindows && !showTitleBar ? (
-          <div
-            data-tauri-drag-region
-            className="absolute top-0 right-0 left-0 z-50 h-9 flex items-center justify-end pr-2"
-          >
-            <WindowControls />
-          </div>
-        ) : null}
-        {sidebarMode === "floating" || sidebarMode === "floating_fixed" ? (
-          <>
-            {/* 悬浮侧边栏 - 绝对定位，占满窗口高度 */}
-            <div
-              className="absolute z-50"
-              style={{
-                left: `${SIDEBAR_LEFT}px`,
-                top: isTitleBarHidden
-                  ? isMacOS
-                    ? "10px"
-                    : "12px"
-                  : "48px",
-                bottom: "12px",
-              }}
-            >
-              <Sidebar
-                activeTab={activeTab}
-                onTabChange={handleTabChange}
-                user={user}
-                onUserChange={setUser}
-                collapsed={sidebarCollapsed}
-                onCollapseChange={setSidebarCollapsed}
-                collapsedWidth={SIDEBAR_COLLAPSED_WIDTH}
-                mode={sidebarMode}
-                userInfo={userInfo}
-              />
-            </div>
+      <>
+        <div
+            ref={appContainerRef}
+            className={cn(
+              "flex flex-col h-screen w-screen overflow-hidden text-foreground relative",
+              bg.effectType === "frosted" && "frosted-glass-enabled",
+              bg.effectType === "translucent" && "translucent-enabled",
+            )}
+            style={{
+              // 如果没有背景图，应用默认背景色
+              backgroundColor: !bg.backgroundImage ? bg.getBackgroundColorWithOpacity(100) : "transparent",
+            }}
+        >
+          <BackgroundLayer
+              backgroundImage={bg.backgroundImage}
+              imageSrc={bg.imageSrc}
+              backgroundType={bg.backgroundType}
+              videoSrc={bg.videoSrc}
+              videoLoadError={bg.videoLoadError}
+              videoRef={bg.videoRef}
+              videoStartSound={bg.videoStartSound}
+              overlayOpacity={bg.overlayOpacity}
+              blur={bg.blur}
+              getBackgroundColorWithOpacity={bg.getBackgroundColorWithOpacity}
+              appContainerRef={appContainerRef}
+              onVideoError={() => {}}
+              onVideoLoadedData={handleVideoLoadedData}
+          />
 
-            {/* 主内容区域 - 绝对定位，从顶部开始 */}
-            <div
-              className="absolute z-40 overflow-hidden rounded-b-[12px]"
-              style={{
-                left: `${SIDEBAR_LEFT + SIDEBAR_COLLAPSED_WIDTH}px`,
-                right: "0",
-                top: shouldPadTop ? "36px" : "0",
-                bottom: "0",
-              }}
-            >
-              {isMacOS && !showTitleBar ? (
+          {shouldShowTitleBar && <div className="relative z-50"><TitleBar /></div>}
+          {isWindows && !showTitleBar && (
+              <div data-tauri-drag-region className="absolute top-0 right-0 left-0 z-50 h-9 flex items-center justify-end pr-2">
+                <WindowControls />
+              </div>
+          )}
+
+          {(sidebarMode === "floating" || sidebarMode === "floating_fixed") ? (
+              <>
                 <div
-                  data-tauri-drag-region
-                  className="absolute top-0 left-0 right-0 h-8 z-10"
+                    className="absolute z-50"
+                    style={{
+                      left: `${SIDEBAR_LEFT}px`,
+                      top: isTitleBarHidden ? (isMacOS ? "10px" : "12px") : "48px",
+                      bottom: "12px",
+                    }}
+                >
+                  <Sidebar
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                      user={user}
+                      onUserChange={setUser}
+                      collapsed={sidebarCollapsed}
+                      onCollapseChange={setSidebarCollapsed}
+                      collapsedWidth={SIDEBAR_COLLAPSED_WIDTH}
+                      mode={sidebarMode}
+                      userInfo={userInfo}
+                  />
+                </div>
+                <div
+                    className="absolute z-40 overflow-hidden rounded-b-[12px]"
+                    style={{
+                      left: `${SIDEBAR_LEFT + SIDEBAR_COLLAPSED_WIDTH}px`,
+                      right: "0",
+                      top: shouldPadTop ? "36px" : "0",
+                      bottom: "0",
+                    }}
+                >
+                  <div className="h-full overflow-auto px-6 pt-4 pb-6 md:px-8 md:pt-6 md:pb-8">
+                    <div className="max-w-6xl mx-auto w-full h-full flex flex-col">{content}</div>
+                  </div>
+                </div>
+              </>
+          ) : (
+              <div className="relative flex flex-1 overflow-hidden">
+                <Sidebar
+                    activeTab={activeTab}
+                    onTabChange={setActiveTab}
+                    user={user}
+                    onUserChange={setUser}
+                    mode="classic"
+                    userInfo={userInfo}
                 />
-              ) : null}
-              <div className="h-full overflow-auto px-6 pt-4 pb-6 md:px-8 md:pt-6 md:pb-8">
-                <div className="max-w-6xl mx-auto w-full h-full">
-                  <div className="h-full flex flex-col">{content}</div>
+                <div className="flex-1 flex flex-col overflow-hidden relative">
+                  {isMacOS && !showTitleBar && <div data-tauri-drag-region className="h-8 flex-shrink-0 w-full" />}
+                  <div className={`flex-1 overflow-auto px-6 pb-6 md:px-8 md:pb-8 ${shouldPadTop ? "pt-4 md:pt-6" : "pt-0"}`}>
+                    <div className="max-w-6xl mx-auto w-full h-full flex flex-col">{content}</div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </>
-        ) : (
-          /* 经典侧边栏布局 */
-          <div className="relative flex flex-1 overflow-hidden">
-            <Sidebar
-              activeTab={activeTab}
-              onTabChange={handleTabChange}
-              user={user}
-              onUserChange={setUser}
-              mode="classic"
-              userInfo={userInfo}
+          )}
+        </div>
+
+        <AntivirusWarningDialog isOpen={showAntivirusWarning} onClose={() => setShowAntivirusWarning(false)} onConfirm={() => setActiveTab("settings")} />
+        <CloseConfirmDialog
+            isOpen={showCloseConfirmDialog}
+            onClose={() => setShowCloseConfirmDialog(false)}
+            onMinimizeToTray={() => { window.dispatchEvent(new CustomEvent("minimizeToTray")); setShowCloseConfirmDialog(false); }}
+            onCloseApp={() => { window.dispatchEvent(new CustomEvent("closeApp")); setShowCloseConfirmDialog(false); }}
+        />
+        {updateInfo && (
+            <UpdateDialog
+                isOpen={!!updateInfo} onClose={() => !isDownloadingUpdate && setUpdateInfo(null)}
+                onUpdate={handleUpdate} version={updateInfo.version} date={updateInfo.date} body={updateInfo.body}
+                isDownloading={isDownloadingUpdate} downloadProgress={downloadProgress}
             />
-            <div className="flex-1 flex flex-col overflow-hidden relative">
-              {isMacOS && !showTitleBar ? (
-                <div
-                  data-tauri-drag-region
-                  className="h-8 flex-shrink-0 w-full"
-                />
-              ) : null}
-              <div
-                className={`flex-1 overflow-auto px-6 pb-6 md:px-8 md:pb-8 ${shouldPadTop ? "pt-4 md:pt-6" : "pt-0"}`}
-              >
-                <div className="max-w-6xl mx-auto w-full h-full">
-                  <div className="h-full flex flex-col">{content}</div>
-                </div>
-              </div>
-            </div>
-          </div>
         )}
-      </div>
-
-      <AntivirusWarningDialog
-        isOpen={showAntivirusWarning}
-        onClose={() => setShowAntivirusWarning(false)}
-        onConfirm={() => setActiveTab("settings")}
-      />
-
-      <CloseConfirmDialog
-        isOpen={showCloseConfirmDialog}
-        onClose={() => setShowCloseConfirmDialog(false)}
-        onMinimizeToTray={() => {
-          localStorage.setItem("closeBehavior", "minimize_to_tray");
-          setShowCloseConfirmDialog(false);
-          window.dispatchEvent(new CustomEvent("minimizeToTray"));
-        }}
-        onCloseApp={() => {
-          localStorage.setItem("closeBehavior", "close_app");
-          setShowCloseConfirmDialog(false);
-          window.dispatchEvent(new CustomEvent("closeApp"));
-        }}
-      />
-
-      {updateInfo && (
-        <UpdateDialog
-          isOpen={!!updateInfo}
-          onClose={handleCloseUpdateDialog}
-          onUpdate={handleUpdate}
-          version={updateInfo.version}
-          date={updateInfo.date}
-          body={updateInfo.body}
-          isDownloading={isDownloadingUpdate}
-          downloadProgress={downloadProgress}
-        />
-      )}
-    </>
+      </>
   );
 }
 
