@@ -53,6 +53,9 @@ export function Settings() {
     setOverlayOpacity,
     blur,
     setBlur,
+    intervalTime,
+    setIntervalTime,
+    handleSelectFolder,
     handleSelectBackgroundImage,
     handleClearBackgroundImage,
   } = useBackgroundImage();
@@ -255,6 +258,9 @@ export function Settings() {
           setTunnelSoundEnabled={setTunnelSoundEnabled}
           onSelectBackgroundImage={handleSelectBackgroundImage}
           onClearBackgroundImage={handleClearBackgroundImage}
+          onSelectFolder={handleSelectFolder}
+          intervalTime={intervalTime}
+          setIntervalTime={setIntervalTime}
         />
 
         <NetworkSection

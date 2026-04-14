@@ -79,6 +79,28 @@ fn build_tray_menu(app: &tauri::App) -> Result<tauri::menu::Menu<tauri::Wry>, Bo
         .map_err(Into::into)
 }
 
+use std::fs;
+
+#[tauri::command]
+fn read_image_folder(dir_path: String) -> Vec<String> {
+    let mut images = Vec::new();
+    let extensions = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+
+    if let Ok(entries) = fs::read_dir(dir_path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                    if extensions.contains(&ext.to_lowercase().as_str()) {
+                        images.push(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    images
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -255,6 +277,7 @@ pub fn run() {
             commands::start_custom_tunnel,
             commands::stop_custom_tunnel,
             commands::is_custom_tunnel_running,
+            read_image_folder,
             commands::copy_background_video,
             commands::copy_background_image,
             commands::get_background_video_path,
