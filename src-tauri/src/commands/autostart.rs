@@ -91,38 +91,3 @@ pub async fn set_tunnel_auto_start(
     
     Ok(())
 }
-
-/// 获取所有自动启动的隧道列表
-#[tauri::command]
-pub async fn get_auto_start_tunnels(
-    app: tauri::AppHandle,
-) -> Result<Vec<(String, String)>, String> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-    
-    let config_path = app_data_dir.join("tunnel_auto_start.json");
-    
-    if !config_path.exists() {
-        return Ok(vec![]);
-    }
-    
-    let content = std::fs::read_to_string(&config_path)
-        .map_err(|e| format!("读取配置文件失败: {}", e))?;
-    
-    let config: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&content)
-        .map_err(|e| format!("解析配置文件失败: {}", e))?;
-    
-    let mut result = vec![];
-    for (key, value) in config {
-        if let Some(true) = value.as_bool() {
-            // 解析 key 格式: "api_123" or "custom_any_id_with_underscore"
-            if let Some((tunnel_type, id_str)) = key.split_once('_') {
-                result.push((tunnel_type.to_string(), id_str.to_string()));
-            }
-        }
-    }
-    
-    Ok(result)
-}

@@ -10,7 +10,6 @@ import { useProxy } from "./hooks/useProxy";
 import {
   getInitialBypassProxy,
   getInitialFrpcLogLevel,
-  getInitialIpv6OnlyNetwork,
   getInitialShowTitleBar,
   getInitialEffectType,
   getInitialVideoStartSound,
@@ -90,9 +89,6 @@ export function Settings() {
   const [frpcLogLevel, setFrpcLogLevel] = useState<FrpcLogLevel>(() =>
     getInitialFrpcLogLevel(),
   );
-  const [ipv6OnlyNetwork, setIpv6OnlyNetwork] = useState<boolean>(() =>
-    getInitialIpv6OnlyNetwork(),
-  );
   const [showTitleBar, setShowTitleBar] = useState<boolean>(() =>
     getInitialShowTitleBar(),
   );
@@ -122,25 +118,6 @@ export function Settings() {
   useEffect(() => {
     localStorage.setItem("frpcLogLevel", frpcLogLevel);
   }, [frpcLogLevel]);
-
-  useEffect(() => {
-    localStorage.setItem("ipv6OnlyNetwork", ipv6OnlyNetwork.toString());
-    window.dispatchEvent(new Event("ipv6OnlyNetworkChanged"));
-  }, [ipv6OnlyNetwork]);
-
-  useEffect(() => {
-    const handleIpv6OnlyChange = () => {
-      setIpv6OnlyNetwork(localStorage.getItem("ipv6OnlyNetwork") === "true");
-    };
-
-    window.addEventListener("ipv6OnlyNetworkChanged", handleIpv6OnlyChange);
-    return () => {
-      window.removeEventListener(
-        "ipv6OnlyNetworkChanged",
-        handleIpv6OnlyChange,
-      );
-    };
-  }, []);
 
   useEffect(() => {
     localStorage.setItem("showTitleBar", showTitleBar.toString());
@@ -266,8 +243,6 @@ export function Settings() {
         <NetworkSection
           bypassProxy={bypassProxy}
           setBypassProxy={setBypassProxy}
-          ipv6OnlyNetwork={ipv6OnlyNetwork}
-          setIpv6OnlyNetwork={setIpv6OnlyNetwork}
           proxyConfig={proxyConfig}
           updateProxyConfig={updateProxyConfig}
         />

@@ -77,11 +77,17 @@ export function FlowDataCard({
   const chartConfig = {
     上传: {
       label: "上传",
-      color: "hsl(var(--chart-1))" as const,
+      theme: {
+        light: "hsl(var(--chart-1))",
+        dark: "#585E6F",
+      }
     },
     下载: {
       label: "下载",
-      color: "hsl(var(--chart-2))" as const,
+      theme: {
+        light: "hsl(var(--chart-1))",
+        dark: "#585E6F",
+      }
     },
   } satisfies ChartConfig;
 

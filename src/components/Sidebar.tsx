@@ -13,7 +13,6 @@ import {
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
-  clearStoredUser,
   createDeviceAuthorization,
   exchangeDeviceCodeForToken,
   loginWithAccessToken,
@@ -22,6 +21,7 @@ import {
   type StoredUser,
   type UserInfo,
 } from "@/services/api";
+import { performLogout } from "@/services/logout";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SidebarMode } from "./pages/Settings/types";
 import { getInitialEffectType, type EffectType } from "./pages/Settings/utils";
@@ -612,7 +612,7 @@ export function Sidebar({
               onClick={() => {
                 onUserChange(null);
                 setUserMenuOpen(false);
-                clearStoredUser();
+                void performLogout();
                 onTabChange("home");
               }}
             >
@@ -839,7 +839,7 @@ export function Sidebar({
                 onClick={() => {
                   onUserChange(null);
                   setUserMenuOpen(false);
-                  clearStoredUser();
+                  void performLogout();
                   onTabChange("home");
                 }}
               >

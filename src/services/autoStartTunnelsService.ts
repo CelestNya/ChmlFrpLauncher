@@ -45,23 +45,6 @@ export class AutoStartTunnelsService {
       throw new Error(`设置隧道自动启动失败: ${errorMsg}`);
     }
   }
-
-  /**
-   * 获取所有自动启动的隧道列表
-   * @returns 返回 [(tunnelType, tunnelId), ...] 的列表
-   */
-  async getAutoStartTunnels(): Promise<Array<[string, string]>> {
-    try {
-      const result = await invoke<Array<[string, string]>>(
-        "get_auto_start_tunnels",
-      );
-      return result;
-    } catch (error) {
-      console.error("获取自动启动隧道列表失败:", error);
-      return [];
-    }
-  }
-
 }
 
 export const autoStartTunnelsService = new AutoStartTunnelsService();

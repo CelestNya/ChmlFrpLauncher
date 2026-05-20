@@ -39,11 +39,6 @@ export function TunnelCard({
 
   const isCustom = tunnel.type === "custom";
   const isApi = tunnel.type === "api";
-  const [ipv6OnlyNetwork, setIpv6OnlyNetwork] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("ipv6OnlyNetwork") === "true";
-  });
-  const isIpv6Blocked = isApi && ipv6OnlyNetwork && !tunnel.data.node_ipv6;
   const isNodeOffline = isApi && tunnel.data.nodestate !== "online";
 
   const extractFirstDomain = (raw?: string) => {
@@ -117,21 +112,6 @@ export function TunnelCard({
 
     loadAutoStartSetting();
   }, [tunnel, isApi]);
-
-  useEffect(() => {
-    const handleIpv6OnlyChange = () => {
-      if (typeof window === "undefined") return;
-      setIpv6OnlyNetwork(localStorage.getItem("ipv6OnlyNetwork") === "true");
-    };
-
-    window.addEventListener("ipv6OnlyNetworkChanged", handleIpv6OnlyChange);
-    return () => {
-      window.removeEventListener(
-        "ipv6OnlyNetworkChanged",
-        handleIpv6OnlyChange,
-      );
-    };
-  }, []);
 
   const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -289,7 +269,7 @@ export function TunnelCard({
                     <input
                       type="checkbox"
                       checked={isRunning}
-                      disabled={isToggling || isIpv6Blocked || isNodeOffline}
+                      disabled={isToggling || isNodeOffline}
                       onChange={(e) => onToggle(tunnel, e.target.checked)}
                       className="sr-only peer"
                     />
@@ -298,12 +278,12 @@ export function TunnelCard({
                         isRunning
                           ? "bg-foreground"
                           : "bg-muted dark:bg-foreground/12"
-                      } ${isToggling || isIpv6Blocked || isNodeOffline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                      } ${isToggling || isNodeOffline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     ></div>
                     <div
                       className={`absolute left-[2px] top-[3px] w-3.5 h-3.5 bg-background rounded-full shadow-sm transition-transform duration-300 ${
                         isRunning ? "translate-x-[18px]" : ""
-                      } ${isToggling || isIpv6Blocked || isNodeOffline ? "scale-90" : ""}`}
+                      } ${isToggling || isNodeOffline ? "scale-90" : ""}`}
                     ></div>
                   </label>
                 </TooltipTrigger>
@@ -311,13 +291,7 @@ export function TunnelCard({
                   <TooltipContent side="top" className="text-xs">
                     此节点已离线
                   </TooltipContent>
-                ) : (
-                  isIpv6Blocked && (
-                  <TooltipContent side="top" className="text-xs">
-                    此节点无IPV6，您的网络仅支持IPV6
-                  </TooltipContent>
-                  )
-                )}
+                ) : null}
               </Tooltip>
             </TooltipProvider>
           </div>
