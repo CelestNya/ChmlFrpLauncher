@@ -19,7 +19,7 @@ import { CreateTunnelDialog } from "./components/CreateTunnelDialog";
 import { EditTunnelDialog } from "./components/EditTunnelDialog";
 import { EditCustomTunnelDialog } from "./components/EditCustomTunnelDialog";
 import { CustomTunnelDialog } from "./components/CustomTunnelDialog";
-import { AntivirusWarningDialog} from "@/components/dialogs/AntivirusWarningDialog.tsx";
+import { AntivirusWarningDialog} from "@/components/dialogs/AntivirusWarningDialog";
 import {
   fetchNodes,
   type Tunnel,
@@ -297,15 +297,15 @@ export function TunnelList({ user }: TunnelListProps) {
             onSuccess={refreshTunnels}
         />
 
-        {/* 反病毒警告弹窗 */}
-        <AntivirusWarningDialog
-            isOpen={showWarningDialog}
-            onClose={closeWarningDialog}
-            onConfirm={() => {
-              closeWarningDialog();
-              toast.info("请将显示的目录添加到白名单后重新尝试启动");
-            }}
-        />
+          {/* 反病毒警告弹窗（启动场景） */}
+          <AntivirusWarningDialog
+              isOpen={showWarningDialog}
+              onClose={closeWarningDialog}
+              onConfirm={() => {
+                  closeWarningDialog();
+              }}
+              mode="startup"
+          />
       </div>
   );
 }
