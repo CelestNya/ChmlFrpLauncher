@@ -6,12 +6,14 @@ interface AntivirusWarningDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onConfirm?: () => void;
+  mode?: "download" | "startup";
 }
 
 export function AntivirusWarningDialog({
   isOpen,
   onClose,
   onConfirm,
+  mode = "download",
 }: AntivirusWarningDialogProps) {
   const [frpcDir, setFrpcDir] = useState<string>("");
   const [copied, setCopied] = useState(false);
@@ -41,6 +43,8 @@ export function AntivirusWarningDialog({
     }
   };
 
+  const isStartupMode = mode === "startup";
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200"
@@ -50,16 +54,19 @@ export function AntivirusWarningDialog({
         className="w-full max-w-md rounded-2xl bg-card/95 backdrop-blur-md border border-border/50 p-8 shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-4 duration-300"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 头部 */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-foreground to-foreground/80 flex items-center justify-center shadow-sm">
               <AlertTriangle className="w-5 h-5 text-background" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-foreground">下载被拦截</h2>
+              <h2 className="text-lg font-bold text-foreground">
+                {isStartupMode ? "启动被阻止" : "下载被拦截"}
+              </h2>
               <p className="text-xs text-muted-foreground">
-                杀毒软件阻止了下载
+                {isStartupMode
+                  ? "杀毒软件可能已删除 frpc 文件"
+                  : "杀毒软件阻止了下载"}
               </p>
             </div>
           </div>
@@ -72,10 +79,11 @@ export function AntivirusWarningDialog({
           </button>
         </div>
 
-        {/* 内容 */}
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground leading-relaxed">
-            frpc 客户端可能被杀毒软件（如 Windows Defender）误判为可疑程序。
+            {isStartupMode
+              ? "frpc 客户端可能已被杀毒软件（如 Windows Defender）误判为可疑程序并被删除。请将其安装目录添加到白名单，然后重新尝试启动隧道。"
+              : "frpc 客户端可能被杀毒软件（如 Windows Defender）误判为可疑程序。"}
           </p>
 
           <div className="space-y-2">
@@ -105,13 +113,14 @@ export function AntivirusWarningDialog({
             <p className="text-sm font-medium text-foreground">解决方法：</p>
             <ol className="space-y-2 text-sm text-muted-foreground pl-5 list-decimal">
               <li>打开杀毒软件设置</li>
-              <li>将上面的目录添加到白名单</li>
-              <li>重新下载 frpc 客户端</li>
+              <li>将上述目录添加到白名单（排除项）</li>
+              <li>
+                {isStartupMode ? "重新尝试启动隧道" : "重新下载 frpc 客户端"}
+              </li>
             </ol>
           </div>
         </div>
 
-        {/* 按钮 */}
         <div className="flex gap-3 mt-6">
           <button
             onClick={onClose}
@@ -123,7 +132,7 @@ export function AntivirusWarningDialog({
             onClick={handleConfirm}
             className="flex-1 px-4 py-3 rounded-xl bg-foreground text-background text-sm font-semibold hover:opacity-90 transition-all duration-200 shadow-sm"
           >
-            前往设置
+            {isStartupMode ? "我知道了" : "前往设置"}
           </button>
         </div>
       </div>
