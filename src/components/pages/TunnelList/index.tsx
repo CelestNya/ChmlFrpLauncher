@@ -9,7 +9,7 @@ import {
   EmptyMedia,
   EmptyContent,
 } from "@/components/ui/empty";
-import { Network } from "lucide-react";
+import { LoaderCircle, Network } from "lucide-react";
 import { toast } from "sonner";
 import { useTunnelList } from "./hooks/useTunnelList";
 import { useTunnelProgress } from "./hooks/useTunnelProgress";
@@ -51,6 +51,7 @@ export function TunnelList({ user }: TunnelListProps) {
   const {
     tunnels,
     loading,
+    initialLoading,
     error,
     runningTunnels,
     setRunningTunnels,
@@ -130,10 +131,15 @@ export function TunnelList({ user }: TunnelListProps) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-medium text-foreground">隧道</h1>
-            {!loading && !error && (
-                <span className="text-xs text-muted-foreground">
-              {tunnels.length} 个
-            </span>
+            {loading ? (
+              <LoaderCircle
+                className="size-3.5 animate-spin text-muted-foreground"
+                aria-label="正在刷新隧道"
+              />
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {tunnels.length} 个
+              </span>
             )}
           </div>
           <Button
@@ -171,11 +177,11 @@ export function TunnelList({ user }: TunnelListProps) {
           </Button>
         </div>
 
-        {loading ? (
+        {initialLoading ? (
             <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
               加载中...
             </div>
-        ) : error ? (
+        ) : error && tunnels.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
               {error}
             </div>
