@@ -322,22 +322,41 @@ async function ensureAuthenticatedUser(
   throw new Error("登录信息已过期，请重新登录");
 }
 
+async function rawHttpRequest(
+  url: string,
+  options?: RequestInit,
+): Promise<RawHttpResponse> {
+  if (typeof window !== "undefined" && "__TAURI__" in window) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<RawHttpResponse>("http_request_raw", {
+      options: {
+        url,
+        method: (options?.method ?? "GET").toUpperCase(),
+        headers: normalizeHeaders(options?.headers),
+        body: options?.body ? String(options.body) : undefined,
+        bypass_proxy: getBypassProxy(),
+      },
+    });
+  }
+
+  const response = await fetch(url, options);
+  return {
+    status: response.status,
+    body: await response.text(),
+  };
+}
+
 async function oauthRequest(options: {
   path: string;
   body: URLSearchParams;
 }): Promise<RawHttpResponse> {
-  const response = await fetch(getOAuthUrl(options.path), {
+  return rawHttpRequest(getOAuthUrl(options.path), {
     method: "POST",
     headers: getOAuthHeaders(),
     body: options.body.toString(),
     cache: "no-store",
     credentials: "omit",
   });
-
-  return {
-    status: response.status,
-    body: await response.text(),
-  };
 }
 
 function parseOAuthJson<T>(response: RawHttpResponse, fallback: string): T {
@@ -378,50 +397,12 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     try {
       const url = getRequestUrl(endpoint);
 
-      const bypassProxy = getBypassProxy();
-
-      // 在 Tauri 环境中，如果启用绕过代理，使用 Tauri 命令
-      if (
-        typeof window !== "undefined" &&
-        "__TAURI__" in window &&
-        bypassProxy
-      ) {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const method = (options?.method ?? "GET").toUpperCase();
-        const headers: Record<string, string> = {};
-
-        if (headersObj) {
-          Object.entries(headersObj).forEach(([k, v]) => {
-            headers[k] = v;
-          });
-        }
-
-        const body = options?.body ? String(options.body) : undefined;
-
-        const responseText = await invoke<string>("http_request", {
-          options: {
-            url,
-            method,
-            headers: Object.keys(headers).length > 0 ? headers : undefined,
-            body,
-            bypass_proxy: true,
-          },
-        });
-
-        const data = JSON.parse(responseText) as ApiResponse<T>;
-        if (data?.code === 200) {
-          return data.data as T;
-        }
-        throw new Error(data?.msg || "请求失败");
-      } else {
-        // 使用普通的 fetch
-        const res = await fetch(url, options);
-        const data = (await res.json()) as ApiResponse<T>;
-        if (data?.code === 200) {
-          return data.data as T;
-        }
-        throw new Error(data?.msg || "请求失败");
+      const response = await rawHttpRequest(url, options);
+      const data = JSON.parse(response.body) as ApiResponse<T>;
+      if (data?.code === 200) {
+        return data.data as T;
       }
+      throw new Error(data?.msg || `HTTP ${response.status}: 请求失败`);
     } finally {
       pendingRequests.delete(key);
     }
@@ -639,52 +620,16 @@ export async function offlineTunnel(
     authorization,
   };
 
-  const bypassProxy = getBypassProxy();
-
-  // 在 Tauri 环境中，如果启用绕过代理，使用 Tauri 命令
-  if (typeof window !== "undefined" && "__TAURI__" in window && bypassProxy) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const url = endpoint.startsWith("/")
-      ? `${API_BASE_URL}${endpoint}`
-      : `${API_BASE_URL}/${endpoint}`;
-
-    const responseText = await invoke<string>("http_request", {
-      options: {
-        url,
-        method: "POST",
-        headers: headersObj,
-        body: formData.toString(),
-        bypass_proxy: true,
-      },
-    });
-
-    const data = JSON.parse(responseText) as OfflineTunnelResponse;
-    if (data?.code === 200 && data?.state === "success") {
-      return;
-    }
-    throw new Error(data?.msg || "下线隧道失败");
-  } else {
-    // 使用普通的 fetch
-    const url = endpoint.startsWith("/")
-      ? `${API_BASE_URL}${endpoint}`
-      : `${API_BASE_URL}/${endpoint}`;
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers: headersObj,
-      body: formData.toString(),
-    });
-
-    if (!res.ok) {
-      throw new Error(`HTTP错误: ${res.status}`);
-    }
-
-    const data = (await res.json()) as OfflineTunnelResponse;
-    if (data?.code === 200 && data?.state === "success") {
-      return;
-    }
-    throw new Error(data?.msg || "下线隧道失败");
+  const response = await rawHttpRequest(getRequestUrl(endpoint), {
+    method: "POST",
+    headers: headersObj,
+    body: formData.toString(),
+  });
+  const data = JSON.parse(response.body) as OfflineTunnelResponse;
+  if (data?.code === 200 && data?.state === "success") {
+    return;
   }
+  throw new Error(data?.msg || `HTTP ${response.status}: 下线隧道失败`);
 }
 
 export async function deleteTunnel(
