@@ -113,6 +113,7 @@ const DEVICE_CODE_DEFAULT_SCOPE = "profile email offline_access chmlfrp_api";
 
 // 简单的请求去重（针对短时间内重复发起相同请求的场景）
 const pendingRequests = new Map<string, Promise<unknown>>();
+const tokenRefreshPromises = new Map<string, Promise<AuthenticatedUser>>();
 
 function normalizeHeaders(h?: HeadersInit): Record<string, string> {
   if (!h) return {};
@@ -234,13 +235,48 @@ async function refreshAccessToken(refreshToken: string): Promise<DeviceTokenResp
   );
 }
 
-async function ensureAuthenticatedUser(
-  explicitToken?: string,
-): Promise<{
+interface AuthenticatedUser {
   storedUser: StoredUser | null;
   accessToken?: string;
   legacyToken?: string;
-}> {
+}
+
+async function refreshAuthenticatedUser(
+  storedUser: StoredUser,
+): Promise<AuthenticatedUser> {
+  const refreshToken = storedUser.refreshToken!;
+  const refreshed = await refreshAccessToken(refreshToken);
+  if (!refreshed.access_token) {
+    if (getStoredUser()?.refreshToken === refreshToken) {
+      clearStoredUser();
+    }
+    throw new Error(
+      getOAuthErrorMessage(refreshed, "登录信息已过期，请重新登录"),
+    );
+  }
+
+  const updatedUser: StoredUser = {
+    ...storedUser,
+    accessToken: refreshed.access_token,
+    refreshToken: refreshed.refresh_token || storedUser.refreshToken,
+    accessTokenExpiresAt: refreshed.expires_in
+      ? Date.now() + refreshed.expires_in * 1000
+      : storedUser.accessTokenExpiresAt,
+    tokenType: refreshed.token_type || storedUser.tokenType || "Bearer",
+  };
+  if (getStoredUser()?.refreshToken === refreshToken) {
+    saveStoredUser(updatedUser);
+  }
+  return {
+    storedUser: updatedUser,
+    accessToken: updatedUser.accessToken,
+    legacyToken: getLegacyApiToken(updatedUser),
+  };
+}
+
+async function ensureAuthenticatedUser(
+  explicitToken?: string,
+): Promise<AuthenticatedUser> {
   if (explicitToken?.trim()) {
     return {
       storedUser: getStoredUser(),
@@ -256,28 +292,15 @@ async function ensureAuthenticatedUser(
   const currentAccessToken = getCurrentAccessToken(storedUser);
   if (currentAccessToken) {
     if (storedUser.refreshToken && isAccessTokenExpiring(storedUser)) {
-      const refreshed = await refreshAccessToken(storedUser.refreshToken);
-      if (!refreshed.access_token) {
-        clearStoredUser();
-        throw new Error(
-          getOAuthErrorMessage(refreshed, "登录信息已过期，请重新登录"),
-        );
+      const refreshToken = storedUser.refreshToken;
+      let refreshPromise = tokenRefreshPromises.get(refreshToken);
+      if (!refreshPromise) {
+        refreshPromise = refreshAuthenticatedUser(storedUser).finally(() => {
+          tokenRefreshPromises.delete(refreshToken);
+        });
+        tokenRefreshPromises.set(refreshToken, refreshPromise);
       }
-      const updatedUser: StoredUser = {
-        ...storedUser,
-        accessToken: refreshed.access_token,
-        refreshToken: refreshed.refresh_token || storedUser.refreshToken,
-        accessTokenExpiresAt: refreshed.expires_in
-          ? Date.now() + refreshed.expires_in * 1000
-          : storedUser.accessTokenExpiresAt,
-        tokenType: refreshed.token_type || storedUser.tokenType || "Bearer",
-      };
-      saveStoredUser(updatedUser);
-      return {
-        storedUser: updatedUser,
-        accessToken: updatedUser.accessToken,
-        legacyToken: getLegacyApiToken(updatedUser),
-      };
+      return refreshPromise;
     }
 
     return {
