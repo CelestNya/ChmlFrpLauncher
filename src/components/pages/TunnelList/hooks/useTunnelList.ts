@@ -5,7 +5,7 @@ import { customTunnelService } from "@/services/customTunnelService";
 import { tunnelListCache } from "../cache";
 import type { UnifiedTunnel } from "../types";
 
-export function useTunnelList() {
+export function useTunnelList(authKey?: string) {
   const [tunnels, setTunnels] = useState<UnifiedTunnel[]>(
     () => tunnelListCache.tunnels,
   );
@@ -65,7 +65,7 @@ export function useTunnelList() {
     setRunningTunnels(running);
   }, []);
 
-  const loadTunnels = async () => {
+  const loadTunnels = useCallback(async () => {
     setLoading(true);
     setError("");
 
@@ -122,11 +122,11 @@ export function useTunnelList() {
       setInitialLoading(false);
       setLoading(false);
     }
-  };
+  }, [checkRunningStatus]);
 
   useEffect(() => {
     loadTunnels();
-  }, []);
+  }, [authKey, loadTunnels]);
 
   // 监听守护进程自动重启事件
   useEffect(() => {
