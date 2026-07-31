@@ -3,6 +3,7 @@
 ChmlFrp 官方启动器，基于 Tauri + React + TypeScript 构建的跨平台桌面应用程序。
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![GitHub release downloads](https://img.shields.io/github/downloads/TechCat-Team/ChmlFrpLauncher/total.svg)](https://github.com/TechCat-Team/ChmlFrpLauncher/releases)
 
 ## 特性
 
