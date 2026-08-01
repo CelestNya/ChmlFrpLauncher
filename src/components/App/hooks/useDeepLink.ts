@@ -1,13 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { deepLinkService, type DeepLinkData } from "@/services/deepLinkService";
-import {
-  getStoredUser,
-  type StoredUser,
-  fetchTunnels,
-  fetchUserInfo,
-  saveStoredUser,
-} from "@/services/api";
+import { getStoredUser, type StoredUser, fetchTunnels } from "@/services/api";
 import { frpcDownloader } from "@/services/frpcDownloader.ts";
 import { frpcManager } from "@/services/frpcManager";
 import { logStore } from "@/services/logStore";
@@ -22,10 +16,7 @@ import {
  * Deep Link 处理 hook
  * 处理深度链接启动隧道的逻辑
  */
-export function useDeepLink(
-  user: StoredUser | null,
-  setUser: (user: StoredUser | null) => void,
-) {
+export function useDeepLink(user: StoredUser | null) {
   const pendingDeepLinkRef = useRef<DeepLinkData | null>(null);
   const isAppReady = true;
 
@@ -33,42 +24,7 @@ export function useDeepLink(
     async (data: DeepLinkData) => {
       try {
         const currentUser = getStoredUser();
-        let tokenToUse = data.usertoken || currentUser?.usertoken;
-
-        if (data.usertoken && !currentUser?.usertoken) {
-          toast.loading("正在使用 token 登录...", {
-            duration: Infinity,
-          });
-
-          try {
-            const userInfo = await fetchUserInfo(data.usertoken);
-
-            const newUser: StoredUser = {
-              username: userInfo.username,
-              usergroup: userInfo.usergroup,
-              userimg: userInfo.userimg || null,
-              usertoken: data.usertoken,
-              tunnelCount: userInfo.tunnelCount,
-              tunnel: userInfo.tunnel,
-            };
-
-            saveStoredUser(newUser);
-            setUser(newUser);
-            tokenToUse = data.usertoken;
-
-            toast.dismiss();
-            toast.success("登录成功");
-
-            await new Promise((resolve) => setTimeout(resolve, 300));
-          } catch (error) {
-            toast.dismiss();
-            const errorMsg =
-              error instanceof Error ? error.message : "登录失败";
-            toast.error(`使用 token 登录失败: ${errorMsg}`);
-            console.error("Deep-link 登录失败:", error);
-            return;
-          }
-        }
+        const tokenToUse = currentUser?.usertoken;
 
         if (!tokenToUse) {
           toast.error("请先登录账户");
@@ -189,7 +145,7 @@ export function useDeepLink(
         console.error("Deep-link 启动隧道失败:", error);
       }
     },
-    [setUser],
+    [],
   );
 
   useEffect(() => {
