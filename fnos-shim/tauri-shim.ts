@@ -45,7 +45,14 @@
   }
 
   // ---- WebSocket 事件桥接 ----
-  // SPA 由 daemon 静态托管（TRIM_APPDEST/dist），WS 与页面同源；断线指数退避重连。
+  // SPA 由 daemon 静态托管（fnOS 网关 /app/chmlfrp 前缀），WS 与页面同源；断线指数退避重连。
+  // 网关前缀从 location.pathname 推导（fnOS 下 /app/chmlfrp/...，本地开发 /），
+  // 使 API/WS 路径在两种访问方式下都正确。
+  function gatewayPrefix(): string {
+    const m = location.pathname.match(/^(\/app\/[^/]+)/);
+    return m ? m[1] : "";
+  }
+
   function connectEvents(): void {
     if (typeof WebSocket === "undefined") return;
 
@@ -57,7 +64,7 @@
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl =
         (window as unknown as { __FNOS_WS_URL__?: string }).__FNOS_WS_URL__ ||
-        `${proto}//${location.host}/ws/logs`;
+        `${proto}//${location.host}${gatewayPrefix()}/ws/logs`;
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
@@ -95,7 +102,7 @@
 
   // ---- 常规命令：POST /api/invoke 透传 ----
   async function invokeCommand(cmd: string, args: Record<string, unknown>) {
-    const response = await fetch("/api/invoke", {
+    const response = await fetch(`${gatewayPrefix()}/api/invoke`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cmd, args }),
@@ -196,7 +203,7 @@
 
     // 应用信息
     if (plugin === "app" && action === "version") {
-      return fetch("/api/bootstrap")
+      return fetch(`${gatewayPrefix()}/api/bootstrap`)
         .then((r) => r.json())
         .then((d: { version?: string }) => d.version || "0.0.0")
         .catch(() => "0.0.0");
@@ -209,7 +216,7 @@
     // check → daemon /api/update/check（返回 {available, version, url, size}，无更新返回 null）；
     // download_and_install → 依次触发 daemon 下载与应用（apply 后服务重启，前端提示"重启后生效"）。
     if (plugin === "updater" && action === "check") {
-      return fetch("/api/update/check")
+      return fetch(`${gatewayPrefix()}/api/update/check`)
         .then((r) => r.json())
         .then((resp: { ok?: boolean; data?: { available?: boolean } }) => {
           if (resp.ok && resp.data?.available) return resp.data;
@@ -221,11 +228,11 @@
       plugin === "updater" &&
       (action === "download_and_install" || action === "downloadAndInstall")
     ) {
-      return fetch("/api/update/download", { method: "POST" })
+      return fetch(`${gatewayPrefix()}/api/update/download`, { method: "POST" })
         .then((r) => r.json())
         .then((resp: { ok?: boolean; error?: string }) => {
           if (!resp.ok) throw new Error(resp.error || "下载更新失败");
-          return fetch("/api/update/apply", { method: "POST" }).then((r) =>
+          return fetch(`${gatewayPrefix()}/api/update/apply`, { method: "POST" }).then((r) =>
             r.json(),
           );
         })

@@ -60,7 +60,8 @@ echo "[fnos-pack] 构建前端…"
   # 使用仓库的 node_modules（pnpm store 链接）
   ln -s "$REPO_ROOT/node_modules" node_modules
   node node_modules/typescript/bin/tsc -b tsconfig.app.json --force --pretty false
-  node node_modules/vite/bin/vite.js build
+  # MSYS_NO_PATHCONV=1：防止 Git Bash 把 /app/chmlfrp/ 转成 Windows 路径
+  MSYS_NO_PATHCONV=1 node node_modules/vite/bin/vite.js build --base=/app/chmlfrp/
 )
 
 echo "[fnos-pack] 注入 shim…"

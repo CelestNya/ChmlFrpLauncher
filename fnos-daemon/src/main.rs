@@ -18,12 +18,17 @@ mod proxy;
 mod update;
 mod ws;
 
+use axum::body::Body;
+use axum::extract::{Request, State};
+use axum::http::{header, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use custom::CustomManager;
 use events::Event;
 use frpc::FrpcManager;
 use guard::GuardState;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::info;
@@ -38,6 +43,60 @@ pub struct AppState {
     pub update: update::UpdateChecker,
     /// 自更新 / 终止信号广播（触发 serve 优雅退出）
     pub shutdown: broadcast::Sender<()>,
+}
+
+/// SPA fallback：真实文件直接返回，其余（含根路径 /）回退 index.html。
+/// （nest 前缀下 ServeDir 的 not_found_service 与显式 / 路由均不可靠，统一走 fallback）
+async fn spa_fallback(
+    State(state): State<AppState>,
+    req: Request,
+) -> Response {
+    let path = req.uri().path().trim_start_matches('/');
+    serve_static(&state.cfg.web_dir, path).await
+}
+
+/// 从 web_dir 读取文件；不存在或为目录时回退 index.html。
+async fn serve_static(web_dir: &Path, rel: &str) -> Response {
+    let rel = rel.trim_start_matches('/');
+    let candidate = if rel.is_empty() {
+        web_dir.join("index.html")
+    } else {
+        web_dir.join(rel)
+    };
+    let path = if candidate.is_file() {
+        candidate
+    } else {
+        web_dir.join("index.html")
+    };
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => {
+            let mime = mime_for(&path);
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, mime)
+                .body(Body::from(bytes))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+        Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// 精简 MIME 推断（前端产物仅 html/js/css/svg/png 等）。
+fn mime_for(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") | Some("mjs") => "application/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("json") => "application/json",
+        Some("ico") => "image/x-icon",
+        Some("woff2") => "font/woff2",
+        Some("mp3") => "audio/mpeg",
+        Some("webm") => "video/webm",
+        Some("mp4") => "video/mp4",
+        _ => "application/octet-stream",
+    }
 }
 
 /// 构建监听 socket：设置 SO_REUSEPORT，使自更新（B5）spawn 的新进程
@@ -102,7 +161,8 @@ async fn main() {
     // 守护监控（3s 轮询 + 日志模式停止）
     guard::start_guard_monitor(guard.clone(), frpc.clone(), custom.clone(), event_tx.clone());
 
-    let mut shutdown_rx = shutdown_tx.subscribe();
+    let mut shutdown_rx_tcp = shutdown_tx.subscribe();
+    let mut shutdown_rx_socket = shutdown_tx.subscribe();
     let state = AppState {
         cfg: Arc::new(cfg.clone()),
         frpc,
@@ -114,21 +174,21 @@ async fn main() {
     };
     let listen_addr = cfg.listen_addr;
 
-    let app = Router::new()
+    let inner_app = Router::new()
         .route("/api/bootstrap", get(invoke::bootstrap))
         .route("/api/invoke", post(invoke::handle_invoke))
         .route("/ws/logs", get(ws::ws_logs))
         .route("/api/update/check", get(update::handle_check))
         .route("/api/update/download", post(update::handle_download))
         .route("/api/update/apply", post(update::handle_apply))
+        .fallback(spa_fallback)
         .layer(axum::middleware::from_fn(auth::require_auth))
-        .with_state(state)
-        // SPA 静态托管：未知路径回退 index.html（前端路由）
-        .fallback_service(tower_http::services::ServeDir::new(&cfg.web_dir).not_found_service(
-            tower_http::services::ServeFile::new(cfg.web_dir.join("index.html")),
-        ));
+        .with_state(state);
 
-    let listener = build_listener(listen_addr).expect("绑定监听地址失败");
+    // fnOS 统一网关：桌面 iframe 经 gatewayPrefix（/app/chmlfrp）→ unix socket 转发。
+    // TCP 与 socket 均挂在同一前缀下，保证前端资源（vite base=/app/chmlfrp/）
+    // 与 shim 的 API/WS 路径在两种访问方式下一致。
+    let gateway_app = Router::new().nest("/app/chmlfrp", inner_app);
 
     // 优雅关闭：SIGTERM / SIGINT（fnOS cmd/main stop）或自更新 apply
     let signal_task = tokio::spawn(async move {
@@ -151,16 +211,40 @@ async fn main() {
         let _ = shutdown_tx_for_signal.send(());
     });
 
-    let app_state = app;
-    let shutdown_task = async move {
-        // 等待广播关闭信号
-        let _ = shutdown_rx.recv().await;
+    let shutdown_task_tcp = async move {
+        let _ = shutdown_rx_tcp.recv().await;
+    };
+    let shutdown_task_socket = async move {
+        let _ = shutdown_rx_socket.recv().await;
     };
 
-    axum::serve(listener, app_state)
-        .with_graceful_shutdown(shutdown_task)
-        .await
-        .expect("HTTP 服务异常退出");
+    // TCP 监听（fnOS 下仅回环；统一网关走 socket，TCP 供本地调试/健康检查）
+    let listener = build_listener(listen_addr).expect("绑定监听地址失败");
+    let tcp_serve = axum::serve(listener, gateway_app.clone())
+        .with_graceful_shutdown(shutdown_task_tcp);
+
+    // 统一网关 unix socket（TRIM_APPDEST/app.sock）
+    let socket_task = async {
+        if let Some(sock_path) = cfg.gateway_socket_path() {
+            // 清理旧 socket 文件（重启衔接）
+            let _ = std::fs::remove_file(&sock_path);
+            let listener =
+                tokio::net::UnixListener::bind(&sock_path).expect("绑定网关 socket 失败");
+            info!("网关 socket 监听: {}", sock_path.display());
+            axum::serve(listener, gateway_app)
+                .with_graceful_shutdown(shutdown_task_socket)
+                .await
+                .expect("网关 socket 服务异常退出");
+        } else {
+            info!("未设置 TRIM_APPDEST，跳过网关 socket 监听");
+            std::future::pending::<()>().await;
+        }
+    };
+
+    tokio::select! {
+        res = tcp_serve => res.expect("TCP 服务异常退出"),
+        _ = socket_task => {}
+    }
 
     signal_task.abort();
     info!("chmlfrp-daemon 已退出");
