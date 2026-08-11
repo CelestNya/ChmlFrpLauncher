@@ -5,6 +5,7 @@
 //! 数据目录 / 进程表 / broadcast 事件通道）。
 
 use crate::events::{Event, LogMessage};
+use crate::guard::{self, GuardState};
 use crate::persist::Persistence;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::fmt::Write;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command as StdCommand, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::sync::broadcast;
 
@@ -46,15 +47,21 @@ pub struct FrpcManager {
     pub processes: Mutex<HashMap<i32, Child>>,
     pub persistence: Persistence,
     pub events: broadcast::Sender<Event>,
+    pub guard: Arc<GuardState>,
 }
 
 impl FrpcManager {
-    pub fn new(data_dir: PathBuf, events: broadcast::Sender<Event>) -> Self {
+    pub fn new(
+        data_dir: PathBuf,
+        events: broadcast::Sender<Event>,
+        guard: Arc<GuardState>,
+    ) -> Self {
         Self {
             data_dir: data_dir.clone(),
             processes: Mutex::new(HashMap::new()),
             persistence: Persistence::new(&data_dir),
             events,
+            guard,
         }
     }
 
@@ -181,11 +188,17 @@ impl FrpcManager {
             .persistence
             .save_running_tunnel(tunnel_id, pid, "api", None);
 
+        // 加入守护集合（守护启用时生效）
+        guard::add_guarded_process(&self.guard, tunnel_id, config);
+
         Ok(format!("frpc 已启动 (PID: {})", pid))
     }
 
     /// 停止官方隧道 frpc（MutexGuard 先 drop 再走孤儿回收，顺序约束照桌面版）。
     pub async fn stop_frpc(&self, tunnel_id: i32) -> Result<String, String> {
+        // 先移出守护集合并标记手动停止（照桌面版 stop_frpc 首步）
+        guard::remove_guarded_process(&self.guard, tunnel_id, true);
+
         let found_in_manager = {
             let mut procs = self
                 .processes
@@ -217,7 +230,7 @@ impl FrpcManager {
             let app_dir = self.data_dir.clone();
             if let Some(info) = self
                 .persistence
-                .get_running_tunnels()
+                .get_all_records()
                 .into_iter()
                 .find(|t| t.tunnel_id == tunnel_id)
             {

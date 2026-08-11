@@ -84,13 +84,22 @@ impl Persistence {
         still_running
     }
 
-    /// 获取仍在运行的隧道列表（不清理）。
+    /// 获取仍在运行的隧道列表（仅存活 PID，不清理）。
     pub fn get_running_tunnels(&self) -> Vec<PersistedTunnelInfo> {
         let path = self.path();
         let tunnels = load_persisted_tunnels_from_file(&path);
         tunnels
             .values()
             .filter(|info| is_process_alive(info.pid))
+            .cloned()
+            .collect()
+    }
+
+    /// 获取全部隧道记录（不过滤存活状态——供孤儿清理等场景使用）。
+    pub fn get_all_records(&self) -> Vec<PersistedTunnelInfo> {
+        let path = self.path();
+        load_persisted_tunnels_from_file(&path)
+            .values()
             .cloned()
             .collect()
     }

@@ -8,13 +8,16 @@ mod auth;
 mod config;
 mod events;
 mod frpc;
+mod guard;
 mod invoke;
 mod persist;
+mod ws;
 
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use events::Event;
 use frpc::FrpcManager;
+use guard::GuardState;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::info;
@@ -23,6 +26,7 @@ use tracing::info;
 pub struct AppState {
     pub cfg: Arc<config::DaemonConfig>,
     pub frpc: Arc<FrpcManager>,
+    pub guard: Arc<GuardState>,
     pub events: broadcast::Sender<Event>,
 }
 
@@ -46,7 +50,8 @@ async fn main() {
     );
 
     let (event_tx, _) = broadcast::channel(1024);
-    let frpc = Arc::new(FrpcManager::new(cfg.data_dir.clone(), event_tx.clone()));
+    let guard = GuardState::new(); // D1：守护默认开启
+    let frpc = Arc::new(FrpcManager::new(cfg.data_dir.clone(), event_tx.clone(), guard.clone()));
 
     // 恢复仍在运行的隧道进程（仅记录与日志，守护接管见 guard.rs）
     let recovered = frpc.persistence.recover_running_tunnels();
@@ -54,16 +59,21 @@ async fn main() {
         info!("发现 {} 个仍在运行的隧道进程", recovered.len());
     }
 
+    // 守护监控（3s 轮询 + 日志模式停止）
+    guard::start_guard_monitor(guard.clone(), frpc.clone(), event_tx.clone());
+
     let state = AppState {
         cfg: Arc::new(cfg.clone()),
         frpc,
+        guard,
         events: event_tx,
     };
     let listen_addr = cfg.listen_addr;
 
     let app = Router::new()
         .route("/api/bootstrap", get(invoke::bootstrap))
-        .route("/api/invoke", axum::routing::post(invoke::handle_invoke))
+        .route("/api/invoke", post(invoke::handle_invoke))
+        .route("/ws/logs", get(ws::ws_logs))
         .layer(axum::middleware::from_fn(auth::require_auth))
         .with_state(state);
 

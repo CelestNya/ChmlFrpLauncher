@@ -11,6 +11,7 @@
 //! 事件（frpc-log 等）经 /ws/logs 推送（C3 接入）。
 
 use crate::frpc::TunnelConfig;
+use crate::guard;
 use crate::AppState;
 use axum::extract::State;
 use axum::Json;
@@ -128,7 +129,7 @@ async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Va
             let info = state
                 .frpc
                 .persistence
-                .get_running_tunnels()
+                .get_all_records()
                 .into_iter()
                 .find(|t| t.tunnel_id == args.tunnel_id);
             match info {
@@ -153,9 +154,96 @@ async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Va
             Ok(json!(data))
         }
 
+        // ---- 进程守护（C3） ----
+        "set_process_guard_enabled" => {
+            #[derive(Deserialize)]
+            struct GuardArgs {
+                enabled: bool,
+            }
+            let args: GuardArgs = parse_args(args)?;
+            let data = guard::set_process_guard_enabled(&state.guard, args.enabled);
+            Ok(json!(data))
+        }
+        "get_process_guard_enabled" => {
+            let data = guard::get_process_guard_enabled(&state.guard);
+            Ok(json!(data))
+        }
+        "add_guarded_process" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct AddGuardedArgs {
+                tunnel_id: i32,
+                config: TunnelConfig,
+            }
+            let args: AddGuardedArgs = parse_args(args)?;
+            guard::add_guarded_process(&state.guard, args.tunnel_id, args.config);
+            Ok(json!(null))
+        }
+        "add_guarded_custom_tunnel" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct AddCustomGuardedArgs {
+                tunnel_id: i32,
+                original_id: String,
+            }
+            let args: AddCustomGuardedArgs = parse_args(args)?;
+            guard::add_guarded_custom_tunnel(&state.guard, args.tunnel_id, args.original_id);
+            Ok(json!(null))
+        }
+        "remove_guarded_process" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct RemoveGuardedArgs {
+                tunnel_id: i32,
+                #[serde(default)]
+                is_manual_stop: bool,
+            }
+            let args: RemoveGuardedArgs = parse_args(args)?;
+            guard::remove_guarded_process(&state.guard, args.tunnel_id, args.is_manual_stop);
+            Ok(json!(null))
+        }
+        "check_log_and_stop_guard" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct CheckLogArgs {
+                tunnel_id: i32,
+                log_message: String,
+            }
+            let args: CheckLogArgs = parse_args(args)?;
+            let data = check_log_with_emit(&state, args.tunnel_id, args.log_message).await?;
+            Ok(json!(data))
+        }
+
         // ---- NO_OP：fnOS 版显式不可用 ----
         "fix_frpc_ini_tls" => Err("该功能在 fnOS 版不可用: fix_frpc_ini_tls".to_string()),
 
         _ => Err(format!("未知或不可用的命令: {cmd}")),
     }
+}
+
+/// check_log_and_stop_guard 的 daemon 实现：命中模式则移除守护并广播日志。
+async fn check_log_with_emit(
+    state: &AppState,
+    tunnel_id: i32,
+    log_message: String,
+) -> Result<String, String> {
+    use crate::events::{Event, LogMessage};
+
+    let Some(pattern) = guard::should_stop_guard_by_log(&log_message) else {
+        return Ok("无需停止守护".to_string());
+    };
+
+    guard::remove_guarded_process(&state.guard, tunnel_id, false);
+
+    let timestamp = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
+    let _ = state.events.send(Event::log(LogMessage {
+        tunnel_id,
+        message: format!(
+            "[W] [ChmlFrpLauncher] 检测到错误 \"{}\"，已停止守护进程",
+            pattern
+        ),
+        timestamp,
+    }));
+
+    Ok("已停止守护进程".to_string())
 }

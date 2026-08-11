@@ -3,10 +3,10 @@
 //! 桌面版通过 tauri `emit` 推事件；daemon 用 broadcast channel，
 //! C3 由 /ws/logs 订阅转发（事件名与载荷与桌面版一致，shim 透传无感）。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// 日志消息（与桌面版 models::LogMessage 载荷一致）。
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct LogMessage {
     pub tunnel_id: i32,
     pub message: String,
