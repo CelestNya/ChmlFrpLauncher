@@ -67,6 +67,8 @@ if [ "$RUST_TARGET" = "x86_64-unknown-linux-gnu" ] && [ "$(uname -m)" = "x86_64"
 else
     # 交叉编译（需 rustup target add + 系统交叉工具链）
     rustup target add "$RUST_TARGET" 2>/dev/null || true
+    # rustls 已消除 openssl 依赖，仅需交叉 C 链接器（gcc-aarch64-linux-gnu）
+    export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER:-aarch64-linux-gnu-gcc}"
     cargo build --release --target "$RUST_TARGET" --manifest-path "$REPO_ROOT/fnos-daemon/Cargo.toml"
     DAEMON_BIN="$CARGO_TARGET_DIR/$RUST_TARGET/release/chmlfrp-daemon"
 fi

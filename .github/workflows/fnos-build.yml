@@ -1,0 +1,81 @@
+name: fnOS Build
+
+# 构建 ChmlFrp fnOS 版 .fpk（双架构）。
+# 触发：打 tag v* 时与桌面版并行；也可手动触发。
+# 流程：patch → 前端构建 → 注入 shim → daemon 编译（x86_64 原生 + aarch64 交叉）→ 组装 .fpk
+# 桌面版 workflow（release.yml）不动。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-fnos:
+    name: fnOS .fpk (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            fnos-daemon/target
+          key: ${{ runner.os }}-fnos-${{ matrix.arch }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-fnos-${{ matrix.arch }}-
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            patch \
+            python3-pil \
+            gcc-aarch64-linux-gnu
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # apply-patches.sh 产出 dist-fnos/（patch + tsc + vite build + shim 注入）
+      - name: Build frontend (patch + shim)
+        run: |
+          bash fnos-pack/apply-patches.sh
+
+      - name: Build .fpk
+        run: |
+          bash fnos-pack/build-fpk.sh --arch ${{ matrix.arch }} --skip-frontend
+
+      - name: Upload .fpk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chmlfrp-fpk-${{ matrix.arch }}
+          path: dist-fpk/*.fpk
+          if-no-files-found: error
