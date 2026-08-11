@@ -20,9 +20,12 @@ use tokio::sync::broadcast;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-/// 隧道配置（与桌面版 models::TunnelConfig 一致，camelCase 反序列化）。
+/// 隧道配置（与桌面版 models::TunnelConfig 一致）。
+///
+/// ⚠️ 字段保持 snake_case：Tauri 2 只对 invoke **顶层参数键**做 camelCase→snake_case
+/// 转换，嵌套结构体按 Rust 字段名原样反序列化——前端 frpcManager 构造的 config
+/// 就是 snake_case（tunnel_id / server_addr / ...），daemon 必须用默认字段名匹配。
 #[derive(Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
 pub struct TunnelConfig {
     pub tunnel_id: i32,
     pub tunnel_name: String,
