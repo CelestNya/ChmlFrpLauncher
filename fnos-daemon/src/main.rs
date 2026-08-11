@@ -6,15 +6,24 @@
 
 mod auth;
 mod config;
+mod events;
+mod frpc;
 mod invoke;
+mod persist;
 
-use axum::{routing::get, Router};
+use axum::routing::get;
+use axum::Router;
+use events::Event;
+use frpc::FrpcManager;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tracing::info;
 
 #[derive(Clone)]
 pub struct AppState {
     pub cfg: Arc<config::DaemonConfig>,
+    pub frpc: Arc<FrpcManager>,
+    pub events: broadcast::Sender<Event>,
 }
 
 #[tokio::main]
@@ -36,8 +45,19 @@ async fn main() {
         cfg.listen_addr
     );
 
+    let (event_tx, _) = broadcast::channel(1024);
+    let frpc = Arc::new(FrpcManager::new(cfg.data_dir.clone(), event_tx.clone()));
+
+    // 恢复仍在运行的隧道进程（仅记录与日志，守护接管见 guard.rs）
+    let recovered = frpc.persistence.recover_running_tunnels();
+    if !recovered.is_empty() {
+        info!("发现 {} 个仍在运行的隧道进程", recovered.len());
+    }
+
     let state = AppState {
         cfg: Arc::new(cfg.clone()),
+        frpc,
+        events: event_tx,
     };
     let listen_addr = cfg.listen_addr;
 
