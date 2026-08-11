@@ -12,7 +12,9 @@ mod events;
 mod frpc;
 mod guard;
 mod invoke;
+mod net;
 mod persist;
+mod proxy;
 mod ws;
 
 use axum::routing::{get, post};

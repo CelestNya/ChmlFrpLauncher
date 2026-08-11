@@ -13,6 +13,8 @@
 use crate::download;
 use crate::frpc::TunnelConfig;
 use crate::guard;
+use crate::net;
+use crate::proxy::{self, HttpRequestOptions};
 use crate::AppState;
 use axum::extract::State;
 use axum::Json;
@@ -310,6 +312,57 @@ async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Va
         }
         "get_download_url" => {
             let data = download::get_download_url().await?;
+            Ok(json!(data))
+        }
+
+        // ---- 网络探测与 HTTP 代理（C5） ----
+        "ping_host" => {
+            #[derive(Deserialize)]
+            struct PingArgs {
+                host: String,
+            }
+            let args: PingArgs = parse_args(args)?;
+            let data = net::ping_host(args.host).await?;
+            Ok(json!(data))
+        }
+        "get_ports" => {
+            let data = net::get_ports().await;
+            Ok(json!(data))
+        }
+        "check_local_port" => {
+            #[derive(Deserialize)]
+            struct PortArgs {
+                port: String,
+            }
+            let args: PortArgs = parse_args(args)?;
+            let data = net::check_local_port(args.port).await;
+            Ok(json!(data))
+        }
+        "resolve_domain_to_ip" => {
+            #[derive(Deserialize)]
+            struct DomainArgs {
+                domain: String,
+            }
+            let args: DomainArgs = parse_args(args)?;
+            let data = net::resolve_domain_to_ip(args.domain).await?;
+            Ok(json!(data))
+        }
+        "http_request" => {
+            #[derive(Deserialize)]
+            struct ProxyArgs {
+                options: HttpRequestOptions,
+            }
+            let args: ProxyArgs = parse_args(args)?;
+            let data = proxy::http_request(args.options).await?;
+            Ok(json!(data))
+        }
+        "http_request_raw" => {
+            #[derive(Deserialize)]
+            struct ProxyArgs {
+                options: HttpRequestOptions,
+            }
+            let args: ProxyArgs = parse_args(args)?;
+            let data = proxy::http_request_raw(args.options).await?;
             Ok(json!(data))
         }
 
