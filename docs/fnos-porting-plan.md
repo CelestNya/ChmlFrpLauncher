@@ -1,8 +1,8 @@
 # fnOS 移植整体开发 Plan
 
 > 最后更新：2026-08-11
-> 状态：第 ② 步已定稿（grill Q1-Q5），进入第 ③ 步逐批 grill。
-> 关联文档：[architecture.md](architecture.md)；fnOS 文档调研结论见项目记忆 `fnos-porting-assessment`。
+> 状态：B1（daemon）✅ → B2（shim+patch）✅ → B3（.fpk）✅ → B4（CI）✅，进入 B5（自更新+打磨）。
+> 关联文档：[architecture.md](architecture.md)；fnOS 文档调研结论见项目记忆 `fnos-porting-assessment`；各批计划见 `docs/plans/b{1,2,3}-*.md`。
 
 ## 一、目标
 
@@ -41,18 +41,19 @@
 - 新增 `fnos-pack/patches/*.patch`（Q4 清单）+ `apply-patches.sh`（临时目录副本应用，CI 与本地可复用）
 - **验收**：浏览器直开 daemon 页面，登录（设备码）→ 隧道全流程 → 日志实时 → 设置开关可操作；patch 后 UI 与 Q4 清单一致
 
-### B3 — fnos-pack（.fpk 打包，依赖 B1 产物，可与 B2 并行）
+### B3 — fnos-pack（.fpk 打包，✅ 已完成）
 
 - 新增 `fnos-pack/`：manifest（`service_port`、`platform`、`ctl_stop`）、`config/privilege`（run-as=package）、`cmd/main`（start/stop/status 拉起 daemon）、`app/ui/config`（**网关模式入口**，type=iframe）、图标、生命周期脚本
-- 双架构：x86_64 + aarch64 交叉编译
-- **验收**：fnpack build 通过；测试设备安装/启动/停止/升级/卸载全流程
-- **实测清单**（本批核心交付）：① fnOS 应用是否随系统启动；② OAuth 设备码 CORS；③ 统一网关注册细节（gatewayPrefix/gatewaySocket/SPA fallback/公网域名访问）；④ target 目录写权限（run-as=package）；⑤ frpc Linux arm64 二进制可得性
+- 双架构：x86_64 + aarch64 交叉编译（build-fpk.sh 支持 `--arch`）
+- **验收**：WSL 产出 x86/arm 双 .fpk，结构/校验和/cmd-main 生命周期冒烟通过；真机安装流程待设备验证
+- **实测清单**（留待真机）：① fnOS 应用是否随系统启动；② OAuth 设备码 CORS；③ 统一网关注册细节；④ target 目录写权限；⑤ frpc Linux arm64 二进制可得性
 
-### B4 — CI 构建（主仓 workflow）
+### B4 — CI 构建（✅ 已完成）
 
-- 新增 job（ubuntu runner）：checkout → pnpm install → **patch 应用到临时副本 → vite build** → **注入 shim** → cargo build daemon（x86_64 + aarch64 交叉）→ fnpack build → .fpk 产物（附件到 Release / artifact）
-- 桌面版现有 workflow 不动
-- **验收**：Actions 全绿，.fpk 在测试设备可装
+- 新增 `.github/workflows/fnos-build.yml`（ubuntu runner）：checkout → pnpm install → **patch 应用到临时副本 → vite build** → **注入 shim** → cargo build daemon（x86_64 原生 + aarch64 交叉）→ build-fpk.sh → .fpk 产物（artifact）
+- 桌面版现有 workflow 不动；触发：打 tag v* 并行 + 手动
+- daemon 已切 rustls（消除 openssl 交叉依赖）
+- **验收**：WSL 实测双架构构建全链路通过；Actions 全绿待 push 验证
 
 ### B5 — 自更新 + 打磨
 
