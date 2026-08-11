@@ -6,6 +6,8 @@
 
 mod auth;
 mod config;
+mod custom;
+mod download;
 mod events;
 mod frpc;
 mod guard;
@@ -15,6 +17,7 @@ mod ws;
 
 use axum::routing::{get, post};
 use axum::Router;
+use custom::CustomManager;
 use events::Event;
 use frpc::FrpcManager;
 use guard::GuardState;
@@ -26,6 +29,7 @@ use tracing::info;
 pub struct AppState {
     pub cfg: Arc<config::DaemonConfig>,
     pub frpc: Arc<FrpcManager>,
+    pub custom: Arc<CustomManager>,
     pub guard: Arc<GuardState>,
     pub events: broadcast::Sender<Event>,
 }
@@ -52,6 +56,7 @@ async fn main() {
     let (event_tx, _) = broadcast::channel(1024);
     let guard = GuardState::new(); // D1：守护默认开启
     let frpc = Arc::new(FrpcManager::new(cfg.data_dir.clone(), event_tx.clone(), guard.clone()));
+    let custom = Arc::new(CustomManager::new(frpc.clone()));
 
     // 恢复仍在运行的隧道进程（仅记录与日志，守护接管见 guard.rs）
     let recovered = frpc.persistence.recover_running_tunnels();
@@ -60,11 +65,12 @@ async fn main() {
     }
 
     // 守护监控（3s 轮询 + 日志模式停止）
-    guard::start_guard_monitor(guard.clone(), frpc.clone(), event_tx.clone());
+    guard::start_guard_monitor(guard.clone(), frpc.clone(), custom.clone(), event_tx.clone());
 
     let state = AppState {
         cfg: Arc::new(cfg.clone()),
         frpc,
+        custom,
         guard,
         events: event_tx,
     };

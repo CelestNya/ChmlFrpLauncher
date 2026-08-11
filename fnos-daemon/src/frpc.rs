@@ -320,7 +320,8 @@ impl FrpcManager {
 }
 
 /// 日志管道：逐行剥离 ANSI → token 脱敏 → 打时间戳 → 推事件。
-fn spawn_log_reader(
+/// （pub(crate)：custom.rs 复用，传空 secret 即不脱敏。）
+pub(crate) fn spawn_log_reader(
     events: broadcast::Sender<Event>,
     tunnel_id: i32,
     user_token: String,

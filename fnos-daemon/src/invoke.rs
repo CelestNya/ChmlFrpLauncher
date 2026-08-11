@@ -10,6 +10,7 @@
 //! 参数结构体统一 `#[serde(rename_all = "camelCase")]`（与 Tauri IPC 参数名一致）；
 //! 事件（frpc-log 等）经 /ws/logs 推送（C3 接入）。
 
+use crate::download;
 use crate::frpc::TunnelConfig;
 use crate::guard;
 use crate::AppState;
@@ -211,6 +212,104 @@ async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Va
             }
             let args: CheckLogArgs = parse_args(args)?;
             let data = check_log_with_emit(&state, args.tunnel_id, args.log_message).await?;
+            Ok(json!(data))
+        }
+
+        // ---- 自定义隧道（C4） ----
+        "save_custom_tunnel" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SaveCustomArgs {
+                tunnel_name: String,
+                config_content: String,
+            }
+            let args: SaveCustomArgs = parse_args(args)?;
+            let data = state.custom.save_custom_tunnel(args.tunnel_name, args.config_content)?;
+            Ok(json!(data))
+        }
+        "get_custom_tunnels" => {
+            let data = state.custom.get_custom_tunnels()?;
+            Ok(json!(data))
+        }
+        "get_custom_tunnel_config" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct TunnelIdArgs {
+                tunnel_id: String,
+            }
+            let args: TunnelIdArgs = parse_args(args)?;
+            let data = state.custom.get_custom_tunnel_config(args.tunnel_id)?;
+            Ok(json!(data))
+        }
+        "update_custom_tunnel" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct UpdateCustomArgs {
+                tunnel_id: String,
+                config_content: String,
+            }
+            let args: UpdateCustomArgs = parse_args(args)?;
+            let data = state
+                .custom
+                .update_custom_tunnel(args.tunnel_id, args.config_content)?;
+            Ok(json!(data))
+        }
+        "delete_custom_tunnel" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct TunnelIdArgs {
+                tunnel_id: String,
+            }
+            let args: TunnelIdArgs = parse_args(args)?;
+            state.custom.delete_custom_tunnel(args.tunnel_id)?;
+            Ok(json!(null))
+        }
+        "start_custom_tunnel" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct TunnelIdArgs {
+                tunnel_id: String,
+            }
+            let args: TunnelIdArgs = parse_args(args)?;
+            let data = state.custom.start_custom_tunnel(args.tunnel_id).await?;
+            Ok(json!(data))
+        }
+        "stop_custom_tunnel" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct TunnelIdArgs {
+                tunnel_id: String,
+            }
+            let args: TunnelIdArgs = parse_args(args)?;
+            let data = state.custom.stop_custom_tunnel(args.tunnel_id).await?;
+            Ok(json!(data))
+        }
+        "is_custom_tunnel_running" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct TunnelIdArgs {
+                tunnel_id: String,
+            }
+            let args: TunnelIdArgs = parse_args(args)?;
+            let data = state.custom.is_custom_tunnel_running(args.tunnel_id)?;
+            Ok(json!(data))
+        }
+
+        // ---- frpc 下载（C4） ----
+        "download_frpc" => {
+            let data = download::download_frpc(&state.frpc).await?;
+            Ok(json!(data))
+        }
+        "check_frpc_exists" => {
+            let data = download::check_frpc_exists(&state.frpc);
+            Ok(json!(data))
+        }
+        "get_frpc_directory" => {
+            let data = download::get_frpc_directory(&state.frpc);
+            Ok(json!(data))
+        }
+        "get_download_url" => {
+            let data = download::get_download_url().await?;
             Ok(json!(data))
         }
 

@@ -4,6 +4,7 @@
 //! 差异：桌面版用 std::thread + block_on；daemon 全 tokio（select 合并
 //! 3s tick 与事件监听两个职责）；**D1：守护默认开启**（桌面版默认关）。
 
+use crate::custom::CustomManager;
 use crate::events::{AutoRestartedPayload, Event, LogMessage};
 use crate::frpc::{FrpcManager, TunnelConfig};
 use std::collections::{HashMap, HashSet};
@@ -73,6 +74,7 @@ fn get_timestamp() -> String {
 pub fn start_guard_monitor(
     guard: Arc<GuardState>,
     frpc: Arc<FrpcManager>,
+    custom: Arc<CustomManager>,
     events: broadcast::Sender<Event>,
 ) {
     tokio::spawn(async move {
@@ -81,7 +83,7 @@ pub fn start_guard_monitor(
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(3)) => {
-                    tick(&guard, &frpc, &events).await;
+                    tick(&guard, &frpc, &custom, &events).await;
                 }
                 Ok(event) = rx.recv() => {
                     if let Event { event_type: "frpc-log", payload } = event {
@@ -95,7 +97,12 @@ pub fn start_guard_monitor(
     });
 }
 
-async fn tick(guard: &Arc<GuardState>, frpc: &Arc<FrpcManager>, events: &broadcast::Sender<Event>) {
+async fn tick(
+    guard: &Arc<GuardState>,
+    frpc: &Arc<FrpcManager>,
+    custom: &Arc<CustomManager>,
+    events: &broadcast::Sender<Event>,
+) {
     if !guard.enabled.load(Ordering::SeqCst) {
         return;
     }
@@ -118,10 +125,9 @@ async fn tick(guard: &Arc<GuardState>, frpc: &Arc<FrpcManager>, events: &broadca
 
         let running = match &info.tunnel_type {
             GuardTunnelType::Api { .. } => frpc.is_frpc_running(tunnel_id).unwrap_or(false),
-            GuardTunnelType::Custom { .. } => {
-                // C4 接入自定义隧道后启用
-                frpc.is_frpc_running(tunnel_id).unwrap_or(false)
-            }
+            GuardTunnelType::Custom { original_id } => custom
+                .is_custom_tunnel_running(original_id.clone())
+                .unwrap_or(false),
         };
         if running {
             continue;
@@ -133,13 +139,14 @@ async fn tick(guard: &Arc<GuardState>, frpc: &Arc<FrpcManager>, events: &broadca
             timestamp: get_timestamp(),
         }));
 
-        restart_tunnel(guard, frpc, events, info).await;
+        restart_tunnel(guard, frpc, custom, events, info).await;
     }
 }
 
 async fn restart_tunnel(
     guard: &Arc<GuardState>,
     frpc: &Arc<FrpcManager>,
+    custom: &Arc<CustomManager>,
     events: &broadcast::Sender<Event>,
     info: ProcessGuardInfo,
 ) {
@@ -151,8 +158,9 @@ async fn restart_tunnel(
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             frpc.start_frpc(config.clone()).await
         }
-        GuardTunnelType::Custom { .. } => {
-            Err("自定义隧道守护重启将在 C4 接入".to_string())
+        GuardTunnelType::Custom { original_id } => {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            custom.start_custom_tunnel(original_id.clone()).await
         }
     };
 
