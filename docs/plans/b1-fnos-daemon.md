@@ -1,7 +1,7 @@
 # B1 实施计划：fnos-daemon crate
 
 > 最后更新：2026-08-11
-> 状态：已批准，实施中（对应 commit C0-C6，见文末点位表）。
+> 状态：✅ **已完成**（C1-C6 全部提交，验收通过）
 > 关联：[fnos-porting-plan.md](../fnos-porting-plan.md)（整体 plan）、[architecture.md](../architecture.md)
 
 ## 一、前置约定
@@ -76,13 +76,15 @@ POST /api/invoke
 
 ## 七、commit 点位
 
-| # | commit message | 内容 | 验收 |
-|---|----------------|------|------|
-| C0a | `docs: 架构文档与 fnOS 移植整体计划` | architecture.md / fnos-porting-plan.md / docs README | 文档存在且一致 |
-| C0b | `docs(fnos-daemon): B1 实施计划与验收标准` | 本文档 + README 索引 | 索引含本文档 |
-| C1 | `feat(fnos-daemon): 脚手架与基础路由` | crate 骨架 + config + auth 骨架 + /api/bootstrap + /api/invoke 空分发 | cargo build ✅；curl bootstrap/unknown 命令正确 |
-| C2 | `feat(fnos-daemon): frpc 进程管理与 invoke 分发` | invoke 分发引擎 + frpc.rs + persist.rs | curl 启停 frpc；脱敏验证；PID 持久化 |
-| C3 | `feat(fnos-daemon): 守护轮询与 WS 事件推送` | guard.rs + ws.rs | WS 实时日志；kill 后 3s 自动重启；模式命中停守护 |
-| C4 | `feat(fnos-daemon): 自定义隧道与 frpc 下载` | custom.rs + download.rs | CRUD+启停；sha256 校验；内置优先 |
-| C5 | `feat(fnos-daemon): 网络探测与 HTTP 代理` | net.rs + proxy.rs | ping/端口/DNS；API 代理冒烟 |
-| C6 | `chore(fnos-daemon): 收尾与全量验收` | NO_OP 补齐 + README + 日志完善 | 整体 gate 1-6 全过；桌面版回归 |
+| # | commit message | 内容 | 验收 | 状态 |
+|---|----------------|------|------|------|
+| C0a | `docs: 架构文档与 fnOS 移植整体计划` | architecture.md / fnos-porting-plan.md / docs README | 文档存在且一致 | ✅ |
+| C0b | `docs(fnos-daemon): B1 实施计划与验收标准` | 本文档 + README 索引 | 索引含本文档 | ✅ |
+| C1 | `feat(fnos-daemon): 脚手架与基础路由` | crate 骨架 + config + auth 骨架 + /api/bootstrap + /api/invoke 空分发 | cargo build ✅；curl bootstrap/unknown 命令正确 | ✅ |
+| C2 | `feat(fnos-daemon): frpc 进程管理与 invoke 分发` | invoke 分发引擎 + frpc.rs + persist.rs | curl 启停 frpc；脱敏验证；PID 持久化 | ✅ |
+| C3 | `feat(fnos-daemon): 守护轮询与 WS 事件推送` | guard.rs + ws.rs | WS 实时日志；kill 后 3s 自动重启；模式命中停守护 | ✅ |
+| C4 | `feat(fnos-daemon): 自定义隧道与 frpc 下载` | custom.rs + download.rs | CRUD+启停；sha256 校验；内置优先 | ✅ |
+| C5 | `feat(fnos-daemon): 网络探测与 HTTP 代理` | net.rs + proxy.rs | ping/端口/DNS；API 代理冒烟 | ✅ |
+| C6 | `chore(fnos-daemon): 收尾与全量验收` | NO_OP 补齐 + README + 日志完善 | 整体 gate 1-6 全过；桌面版回归 | ✅ |
+
+> 补充：C2 后追加 `fix(fnos-daemon): invoke 嵌套参数与 Tauri snake_case 对齐`（嵌套结构体字段保持 snake_case，与真实前端载荷匹配）。

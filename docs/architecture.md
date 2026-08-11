@@ -331,11 +331,11 @@ updater 插件（minisign 签名，公钥内置于 tauri.conf.json）：`https:/
 
 ### fnOS 移植（决策已定，见项目记忆 fnos-porting-assessment）
 
-- 🔄 **Tauri IPC 层**：意向替换为 axum HTTP + WebSocket（45 个 command 函数体复用，仅签名层改造）
+- 🔄 **Tauri IPC 层**：意向替换为 axum HTTP + WebSocket（45 个 command 函数体复用，仅签名层改造）——**B1 已交付**：新增 `fnos-daemon/`（axum 服务，见 [b1-fnos-daemon.md](plans/b1-fnos-daemon.md)），`/api/invoke` 透传 32 个命令 + 13 个 NO_OP，`/ws/logs` 事件推送，SPA 静态托管
 - 🔄 **托盘 / 深链接 / 单实例 / updater / 窗口控制**：fnOS 版移除（应用中心 + 服务模型代管）
 - 🔄 **自更新**：改为应用内更新 target 目录文件（.fpk 壳 + 下载替换，机制同桌面 updater）
 - ❌ **打包形态**：`.fpk`（fnpack）+ `cmd/main` 生命周期脚本 + iframe 桌面入口；`platform` 按 x86_64/arm64 双架构
-- ✅ **可复用**：`process` / `process_guard` / `process_persistence` / `custom_tunnel` / `download` / `http` / `ping` / `ports` 全部业务逻辑；前端 `api` 层已具备浏览器 fetch 降级路径（`"__TAURI__" in window` 检测）
+- ✅ **可复用**：`process` / `process_guard` / `process_persistence` / `custom_tunnel` / `download` / `http` / `ping` / `ports` 全部业务逻辑已移植到 daemon；前端 `api` 层已具备浏览器 fetch 降级路径（`"__TAURI__" in window` 检测）
 
 ### 现有技术债
 
