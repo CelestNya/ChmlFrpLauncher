@@ -2,7 +2,7 @@
     ".url": {
         "chmlfrp.Application": {
             "title": "ChmlFrp 内网穿透",
-            "icon": "images/{0}.png",
+            "icon": "images/icon_{0}.png",
             "type": "iframe",
             "protocol": "http",
             "port": "17890",

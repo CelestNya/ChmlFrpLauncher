@@ -4,7 +4,7 @@
 # 本脚本仅管理 daemon 自身：start / stop / status / log。
 #
 # 环境变量由 fnOS 注入：
-#   TRIM_APPDEST   应用 target 目录（chmlfrp-daemon 与 dist/ 所在）
+#   TRIM_APPDEST   应用 target 目录（fnpack 将 app/ 内容平铺于此：chmlfrp-daemon + dist/ + ui/）
 #   TRIM_PKGVAR    运行时数据目录（frpc 二进制 / 隧道配置 / PID）
 #   TRIM_SERVICE_PORT  服务端口（daemon 监听）
 

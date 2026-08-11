@@ -1,7 +1,6 @@
 {
-    "defaults": {
+    "defaults":
+    {
         "run-as": "package"
-    },
-    "username": "chmlfrp",
-    "groupname": "chmlfrp"
+    }
 }

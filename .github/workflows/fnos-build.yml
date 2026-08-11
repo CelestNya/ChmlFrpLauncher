@@ -61,6 +61,10 @@ jobs:
             python3-pil \
             gcc-aarch64-linux-gnu
 
+      # 官方 fnpack 打包工具（build-fpk.sh 内部也有自动下载兜底）
+      - name: Setup fnpack
+        uses: mengzhuo/setup-fnpack@v1
+
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 

@@ -1,44 +1,50 @@
-# B3 实施计划：fnos-pack（.fpk 打包）✅ 已完成并验收
+# B3 实施计划：fnos-pack（.fpk 打包）✅ 已完成并验收（含真机被拒修正）
 
-> 状态：2026-08-11 全部交付。结构级验收通过；真机安装/网关实测留待 fnOS 设备（见"遗留"）。
+> 状态：2026-08-11 交付。**真机安装首版被拒**（应用包不符合系统要求）→ 对照官方 fnpack 重构后通过校验。
+> 本批核心教训：**必须用官方 fnpack 工具打包**（手写 tar 平铺结构不符合 fnOS 包规范）。
 
-## 形态与关键事实（调研结论，来自 fnOS 官方开发指南）
-- **.fpk = tar.gz**：`app.tgz`（target 目录）+ `cmd/` + `config/` + `ui/` + `manifest`（INI 格式）+ 图标 + `*.sc` 端口转发
-- **manifest 是 INI 非 JSON**：`appname/version/display_name/desc/source` 必填；`service_port` 单端口；`platform` 只支持单值（x86/arm）→ 双架构 = 出两个 .fpk
-- **cmd/main**：`start`（拉起 daemon）`stop` `status`（运行 0 / 未运行 3）`log`；TRIM_APPDEST / TRIM_PKGVAR / TRIM_SERVICE_PORT / TRIM_TEMP_LOGFILE 环境变量注入
-- **ui/config**：桌面入口 JSON，`type: "iframe"` 即桌面窗口内嵌加载（ChmlFrp 无原生 GUI 的形态）
-- **config/privilege**：`run-as: "package"`（以专用低权限用户运行）
-- **config/resource**：`port-config.protocol-file` 指向 `*.sc`；systemd-unit 留空（daemon 自行管理）
-- 参考实现：conversun/fnos-apps（mihomo 为 daemon+iframe 同形态范例）
+## ⚠️ 真机被拒根因（2026-08-11 实测，重要）
+首版手写 tar 的 .fpk 结构 = `app.tgz + cmd/ + config/ + ui/(根级) + manifest + ICON + ChmlFrp.sc`，安装报「应用包不符合系统要求」。
+对照**官方 fnpack 1.2.3 生成的骨架**与官方 fnnas/appstore.* 仓库，差异如下：
+1. **目录布局**：官方是 fnpack 项目 = `app/`（含 `ui/`）+ `cmd/` + `config/` + `wizard/` + `manifest` + `ICON.PNG` + `ICON_256.PNG`；`desktop_uidir` 相对于 `app/`（`app/ui/`），**不是根级 ui/**
+2. **app.tgz 生成**：fnpack 把 `app/` 内容**平铺**压成 app.tgz → 安装后 TRIM_APPDEST 下直接是 `chmlfrp-daemon` + `dist/` + `ui/`（无 app/ 层）
+3. **缺 wizard/ 目录**（骨架必须存在，可空 .gitkeep）
+4. **cmd/ 缺生命周期脚本集**（骨架有 8 个：install/upgrade/uninstall/config 的 init+callback）
+5. **manifest 无 checksum**：fnpack 自动补 `checksum`（app.tgz md5）
+6. **config/resource**：官方模板用 `data-share`（非 port-config），ChmlFrp.sc 端口转发非必需（iframe 入口即可）
+7. **privilege**：官方模板不带 username/groupname（run-as=package 即可）
 
-## 交付物
+## 官方 fnpack 契约（修正后依据）
+- 工具下载：`https://static2.fnnas.com/fnpack/fnpack-1.2.3-{linux-amd64|linux-arm64|darwin-*}`；`fnpack create` 生成骨架、`fnpack build` 出包并预检
+- 预检项：manifest 必填字段 / config JSON 合法性 / ICON.PNG+ICON_256.PNG / app/ / cmd/ / wizard/ / `app/{desktop_uidir}/`
+- manifest 格式：`key = value`（对齐列宽），`desktop_applaunchname` 对应 app/ui/config 的 entry ID
+- app.tgz = `app/` 内容平铺（daemon 二进制放 app/ 根）
+
+## 交付物（修正后）
 | 文件 | 说明 |
 |------|------|
-| `fnos-pack/fpk/manifest` | 应用标识（appname=chmlfrp，v0.7.5，platform 构建期改写，service_port=17890） |
-| `fnos-pack/fpk/config/privilege` | run-as=package + chmlfrp 用户 |
-| `fnos-pack/fpk/config/resource` | 端口转发协议文件声明 |
-| `fnos-pack/fpk/ChmlFrp.sc` | 17890/tcp 端口转发 |
-| `fnos-pack/fpk/ui/config` | iframe 桌面入口（chmlfrp.Application） |
-| `fnos-pack/fpk/cmd/main` | 生命周期：start/stop/status/log（管理 daemon，frpc 由 daemon 内守护） |
-| `fnos-pack/build-fpk.sh` | 全链打包：前端（apply-patches.sh）→ daemon release 编译 → 图标缩放 → app.tgz → .fpk；`--arch` 双架构、`--skip-frontend` 复用产物 |
+| `fnos-pack/fpk/manifest` | appname=chmlfrp、v0.7.5、platform 构建期改写、service_port=17890、ctl_stop |
+| `fnos-pack/fpk/app/chmlfrp-daemon` | 构建期放入 daemon 二进制（app/ 根） |
+| `fnos-pack/fpk/app/dist/` | 构建期放入前端产物（shim 注入后） |
+| `fnos-pack/fpk/app/ui/config` | iframe 桌面入口（chmlfrp.Application） |
+| `fnos-pack/fpk/cmd/main` | 生命周期 start/stop/status/log（daemon 常驻，frpc 内守护） |
+| `fnos-pack/fpk/cmd/{install,upgrade,uninstall,config}_{init,callback}` | 生命周期钩子（无额外操作） |
+| `fnos-pack/fpk/config/{privilege,resource}` | run-as=package + data-share |
+| `fnos-pack/fpk/wizard/.gitkeep` | 向导目录（空） |
+| `fnos-pack/build-fpk.sh` | 全链：前端→daemon→组装 fnpack 项目→fnpack build；`--arch` 双架构、`--bundle` 自更新包、自动下载 fnpack（含重试） |
 
-## 验收结果（WSL 已执行）
-1. ✅ `build-fpk.sh` 全链 exit 0，产出 `chmlfrp_0.7.5_x86.fpk`
-2. ✅ .fpk 内部结构完整：app.tgz / cmd/main / config/privilege / config/resource / ui/config / ui/images / ICON.PNG / ICON_256.PNG / ChmlFrp.sc / manifest
-3. ✅ app.tgz 内容：`chmlfrp-daemon`（release 二进制）+ `dist/`（shim 注入后的前端）
-4. ✅ manifest `checksum` 与 app.tgz 实际 md5 一致
-5. ✅ cmd/main 可执行位正确（-rwxr-xr-x）
-6. ✅ cmd/main 生命周期冒烟：start → status(0) → daemon 监听 17891 → log → stop(0) → status(3) → pid 清除
-   （修复：stop 分支 `local` 在顶层非法，改用普通变量）
+## 验收结果（WSL 已执行，修正后）
+1. ✅ 官方 fnpack build 通过（Verifying files → Packing successfully），产物 `chmlfrp_0.7.5_x86.fpk`
+2. ✅ .fpk 结构 = app.tgz + cmd/(9 脚本) + config/ + wizard/ + manifest + ICON*.PNG
+3. ✅ app.tgz = TRIM_APPDEST 内容：chmlfrp-daemon + dist/ + ui/（平铺）
+4. ✅ manifest 自动含 checksum
+5. ✅ cmd/main 生命周期冒烟：start → status(0) → bootstrap 0.7.5 → stop → status(3) → pid 清除
+6. ✅ build-fpk.sh --bundle 正常
 
-## 遗留（需 fnOS 真机 / CI 验证）
-- 应用中心安装/启动/停止/升级/卸载全流程
+## 遗留（需 fnOS 真机验证）
+- 应用中心安装/启动/停止/升级/卸载全流程（本次修正后需重新装）
 - 统一网关 iframe 加载（gatewayPrefix/gatewaySocket、SPA fallback、公网域名访问）
 - fnOS 是否随系统启动应用（隧道自启链路）
 - OAuth 设备码 CORS（iframe 环境）
-- arm64 .fpk 交叉编译（需 rustup target + 交叉工具链，脚本已支持）
-
-## 风险提示
-- `service_port=17890` 与桌面默认端口一致；若与 fnOS 系统端口冲突，改 manifest 一处即可
-- build-fpk.sh 依赖 PIL 生成图标；无 PIL 时跳过图标（.fpk 缺 ICON 不可装，CI 需装 Pillow）
-- daemon 数据目录 TRIM_PKGVAR 由 fnOS 注入；本地模拟用 DAEMON_DATA_DIR/TRIM_PKGVAR
+- arm64 .fpk 交叉编译 + 真机
+- target 目录写权限（run-as=package）→ 自更新 apply 落点
