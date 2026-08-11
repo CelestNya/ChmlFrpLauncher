@@ -366,8 +366,22 @@ async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Va
             Ok(json!(data))
         }
 
-        // ---- NO_OP：fnOS 版显式不可用 ----
-        "fix_frpc_ini_tls" => Err("该功能在 fnOS 版不可用: fix_frpc_ini_tls".to_string()),
+        // ---- NO_OP：fnOS 版显式不可用（桌面专属能力，patch 删 UI 后前端不调用） ----
+        "fix_frpc_ini_tls"
+        | "is_autostart_enabled"
+        | "set_autostart"
+        | "get_tunnel_auto_start"
+        | "set_tunnel_auto_start"
+        | "hide_window"
+        | "show_window"
+        | "quit_app"
+        | "read_image_folder"
+        | "copy_background_video"
+        | "copy_background_image"
+        | "import_background_image_folder"
+        | "get_background_video_path" => {
+            Err(format!("该功能在 fnOS 版不可用: {cmd}"))
+        }
 
         _ => Err(format!("未知或不可用的命令: {cmd}")),
     }

@@ -54,6 +54,7 @@ async fn main() {
         cfg.data_dir.display(),
         cfg.listen_addr
     );
+    info!("前端静态目录: {}", cfg.web_dir.display());
 
     let (event_tx, _) = broadcast::channel(1024);
     let guard = GuardState::new(); // D1：守护默认开启
@@ -83,7 +84,11 @@ async fn main() {
         .route("/api/invoke", post(invoke::handle_invoke))
         .route("/ws/logs", get(ws::ws_logs))
         .layer(axum::middleware::from_fn(auth::require_auth))
-        .with_state(state);
+        .with_state(state)
+        // SPA 静态托管：未知路径回退 index.html（前端路由）
+        .fallback_service(tower_http::services::ServeDir::new(&cfg.web_dir).not_found_service(
+            tower_http::services::ServeFile::new(cfg.web_dir.join("index.html")),
+        ));
 
     let listener = tokio::net::TcpListener::bind(listen_addr)
         .await

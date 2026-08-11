@@ -15,6 +15,8 @@ const DEV_DEFAULT_PORT: u16 = 17890;
 pub struct DaemonConfig {
     /// 数据目录：frpc 二进制 / 隧道配置 / PID 持久化 / 自定义隧道清单
     pub data_dir: PathBuf,
+    /// 前端静态资源目录（SPA dist；fnOS 下 TRIM_APPDEST/dist，开发可覆盖）
+    pub web_dir: PathBuf,
     /// 监听地址（默认仅回环，统一网关在 fnOS 侧转发）
     pub listen_addr: SocketAddr,
 }
@@ -25,6 +27,11 @@ impl DaemonConfig {
             .or_else(|| env_var_path("TRIM_PKGDATA"))
             .unwrap_or_else(default_data_dir);
 
+        let web_dir = env_var_path("TRIM_APPDEST")
+            .map(|d| d.join("dist"))
+            .or_else(|| env_var_path("DAEMON_WEB_DIR"))
+            .unwrap_or_else(|| default_data_dir().join("web"));
+
         let port = std::env::var("TRIM_SERVICE_PORT")
             .ok()
             .and_then(|v| v.parse::<u16>().ok())
@@ -32,6 +39,7 @@ impl DaemonConfig {
 
         Self {
             data_dir,
+            web_dir,
             listen_addr: SocketAddr::from(([127, 0, 0, 1], port)),
         }
     }
