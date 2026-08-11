@@ -1,6 +1,6 @@
 [package]
 name = "chmlfrp-daemon"
-version = "0.1.0"
+version = "0.7.5"
 description = "ChmlFrp fnOS 守护进程（axum 版隧道管理服务）"
 license = "Apache-2.0"
 edition = "2021"
@@ -24,3 +24,7 @@ chrono = "0.4"
 libc = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# 自更新（B5）：bundle 解包 + 监听端口复用（SO_REUSEPORT 供重启衔接）
+tar = "0.4"
+flate2 = "1"
+socket2 = { version = "0.5", features = ["all"] }

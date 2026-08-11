@@ -55,11 +55,13 @@
 - daemon 已切 rustls（消除 openssl 交叉依赖）
 - **验收**：WSL 实测双架构构建全链路通过；Actions 全绿待 push 验证
 
-### B5 — 自更新 + 打磨
+### B5 — 自更新 + 打磨（✅ 已完成）
 
-- daemon `/api/update`：检查远端版本 → 流式下载新 daemon/前端资源 → sha256 校验 → 原子替换 target 目录文件 → 重启生效
-- UI 打磨（NAS 文案）、错误提示、首启引导
-- **验收**：设备上升级链路完整（v1 → v2）
+- daemon `/api/update/check|download|apply`：GitHub Releases 源 → 下载 bundle（daemon+dist+manifest）→ 逐文件 sha256 校验 → 备份替换 target → spawn 新进程（SO_REUSEPORT）→ 优雅关闭旧进程
+- `UPDATE_API_URL` 可覆盖更新源（测试/自托管/限流逃生门）；5 分钟缓存规避 GitHub API 限流
+- shim updater 接线（check→daemon，download_and_install→下载+应用）
+- CI：fnos-build.yml `--bundle` 出包 + attach job 附加到 Release
+- **验收**：WSL 0.7.5→0.7.6 全链路通过（替换/重启/数据保留/版本更新）
 
 ## 四、关键技术要点
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # fnos-pack/build-fpk.sh
-# 构建 ChmlFrp fnOS .fpk 安装包。
+# 构建 ChmlFrp fnOS .fpk 安装包（默认），并可额外生成自更新 bundle（--bundle）。
 #
 # 流程：前端（apply-patches.sh：patch → tsc → vite → shim）→ daemon release 编译 → 组装 app.tgz → 组装 .fpk
 # .fpk 本质是 tar.gz（manifest INI + app.tgz + cmd/ + config/ + ui/ + 图标），格式见 docs/fnos-developer-guide.md
@@ -8,14 +8,16 @@
 # 用法（Linux / WSL / CI）：
 #   bash fnos-pack/build-fpk.sh                # 自动检测架构（x86_64→x86，aarch64→arm）
 #   bash fnos-pack/build-fpk.sh --arch x86_64  # 强制指定
-#   bash fnos-pack/build-fpk.sh --arch aarch64 # 交叉编译（需 aarch64 工具链，见下）
+#   bash fnos-pack/build-fpk.sh --bundle       # 额外生成自更新 bundle（B5）
 #
 # 交叉编译 aarch64 需要：
-#   sudo apt install gcc-aarch64-linux-gnu libssl-dev:arm64 pkg-config
-#   export AARCH64_OPENSSL_DIR=/usr/aarch64-linux-gnu   # 或设置 OPENSSL_DIR 指向交叉 openssl
+#   sudo apt install gcc-aarch64-linux-gnu
+#   rustup target add aarch64-unknown-linux-gnu
+#   （daemon 已用 rustls，无需交叉 openssl）
 #
 # 产物：dist-fpk/chmlfrp_<version>_<platform>.fpk
-# 依赖：cargo / node / pnpm / patch / tar / md5sum / Python3(PIL 可选，图标缩放)
+#       dist-fpk/chmlfrp-fnos-<version>-<platform>.tar.gz（--bundle，含 manifest.json + daemon + dist）
+# 依赖：cargo / node / pnpm / patch / tar / md5sum / sha256sum / Python3(PIL 可选，图标缩放)
 
 set -euo pipefail
 
@@ -26,10 +28,12 @@ OUT_DIR="$REPO_ROOT/dist-fpk"
 # ---------- 参数 ----------
 ARCH="${ARCH:-$(uname -m)}"
 SKIP_FRONTEND=0
+MAKE_BUNDLE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --arch) ARCH="$2"; shift 2 ;;
         --skip-frontend) SKIP_FRONTEND=1; shift ;;
+        --bundle) MAKE_BUNDLE=1; shift ;;
         *) echo "未知参数: $1" >&2; exit 1 ;;
     esac
 done
@@ -134,3 +138,32 @@ FPK_NAME="chmlfrp_${VERSION}_${PLATFORM}.fpk"
 
 echo "[fnos-pack] ✅ 完成: $OUT_DIR/$FPK_NAME ($(du -h "$OUT_DIR/$FPK_NAME" | cut -f1))"
 echo "[fnos-pack]     app.tgz md5: $CHECKSUM"
+
+# ---------- 6. 自更新 bundle（B5，可选 --bundle） ----------
+if [ "$MAKE_BUNDLE" = "1" ]; then
+    echo "[fnos-pack] ⑦ 生成自更新 bundle…"
+    BUNDLE_DIR="$WORK_DIR/bundle"
+    mkdir -p "$BUNDLE_DIR"
+    cp "$APP_DIR/target/chmlfrp-daemon" "$BUNDLE_DIR/chmlfrp-daemon"
+    cp -r "$APP_DIR/target/dist" "$BUNDLE_DIR/dist"
+
+    # manifest.json：{version, platform, files: {相对路径: sha256}}
+    python3 - "$BUNDLE_DIR" "$VERSION" "$PLATFORM" <<'PY'
+import hashlib, json, os, sys
+root, version, platform = sys.argv[1], sys.argv[2], sys.argv[3]
+files = {}
+for d, _, fnames in os.walk(root):
+    for f in fnames:
+        if f == "manifest.json":
+            continue
+        p = os.path.join(d, f)
+        rel = os.path.relpath(p, root).replace(os.sep, "/")
+        files[rel] = hashlib.sha256(open(p, "rb").read()).hexdigest()
+with open(os.path.join(root, "manifest.json"), "w") as fh:
+    json.dump({"version": version, "platform": platform, "files": files}, fh, indent=2)
+PY
+
+    BUNDLE_NAME="chmlfrp-fnos-${VERSION}-${PLATFORM}.tar.gz"
+    ( cd "$BUNDLE_DIR" && tar -czf "$OUT_DIR/$BUNDLE_NAME" * )
+    echo "[fnos-pack] ✅ 完成: $OUT_DIR/$BUNDLE_NAME ($(du -h "$OUT_DIR/$BUNDLE_NAME" | cut -f1))"
+fi

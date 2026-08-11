@@ -28,3 +28,5 @@ package-lock.json
 dist-fnos
 .zcode/
 dist-fpk
+# daemon 本地开发默认数据目录
+data

@@ -1,6 +1,6 @@
-# B5 实施计划：fnOS 软件内自更新（✅ 已批准，文档先行）
+# B5 实施计划：fnOS 软件内自更新（✅ 已完成并验收）
 
-> 状态：2026-08-11 用户确认更新源 = GitHub Releases（fork 仓库 CelestNya/ChmlFrpLauncher）。
+> 状态：2026-08-11 全部交付。WSL 全链路升级模拟通过（0.7.5 → 0.7.6）。
 
 ## 目标
 fnOS 版软件内自更新：daemon 检查远端 GitHub Release → 下载更新 bundle（新 daemon + 前端 dist）→ sha256 校验 → 原子替换 → 重启生效。前端"检查更新/下载更新"入口复用现有 UpdateSection。
@@ -43,13 +43,15 @@ fnOS 版软件内自更新：daemon 检查远端 GitHub Release → 下载更新
 - `docs/plans/b5-fnos-update.md` 勾选；整体 plan 状态更新
 
 ## 验收标准（最终 gate）
-1. WSL 全链路：旧 daemon → `check_update` 发现新版 → `download_update` sha256 通过 → `apply` 替换+重启 → 新版本 bootstrap、同端口、数据保留
-2. 前端更新入口可用（shim 接线）
-3. 安全：bundle sha256 校验失败拒绝 apply；下载 https
-4. 桌面版零影响（daemon 独立 crate）
+1. ✅ WSL 全链路：旧 daemon(v0.7.5) → `check_update` 发现 v0.7.6 → `download_update` sha256 通过 → `apply` 替换+重启 → 新版本 bootstrap 0.7.6、同端口、用户数据保留、旧进程退出
+2. ✅ shim updater 接线（check→daemon /api/update/check；download_and_install→download+apply）
+3. ✅ 安全：bundle 逐文件 sha256 校验失败拒绝 apply；下载走 rustls https；bundle 版本必须高于当前（防降级）；`UPDATE_API_URL` 可覆盖更新源（测试/自托管）
+4. ✅ 桌面版零影响（daemon 独立 crate）
+5. ✅ CI：fnos-build.yml 增加 `--bundle` 出包 + attach job 把 bundle 附加到 Release
 
 ## 风险
-- GitHub API 限流（60/h）：缓存 5 分钟，必要时可配 `UPDATE_API_URL` 覆盖
-- run-as=package 对 target 写权限未验证：若不可写，apply 报明确错误并提示手动（plan 待验证清单第 4 条）；daemon 先以 TRIM_PKGVAR 兜底尝试
-- 替换后 spawn 端口竞争：先 graceful shutdown 释放监听再 spawn
-- 版本号联动：bundle 内 manifest/daemon/前端版本必须一致（CI 生成时强制）
+- GitHub API 限流（60/h）：5 分钟缓存；`UPDATE_API_URL` 可覆盖
+- run-as=package 对 target 写权限未验证：apply 若失败报明确错误；真机验证清单第 4 条
+- 替换后端口竞争：SO_REUSEPORT + 先 spawn 新进程再优雅关闭旧进程，WSL 验证无中断
+- 版本号联动：bundle manifest 版本必须高于当前 daemon（apply 前校验）
+

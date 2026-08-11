@@ -205,9 +205,34 @@
       return invokePlugin("plugin:app|version", args);
     }
 
-    // 更新器：fnOS 自更新走 daemon（B5），前端插件检查一律无更新
+    // 更新器：fnOS 自更新由 daemon 承载（B5）。
+    // check → daemon /api/update/check（返回 {available, version, url, size}，无更新返回 null）；
+    // download_and_install → 依次触发 daemon 下载与应用（apply 后服务重启，前端提示"重启后生效"）。
     if (plugin === "updater" && action === "check") {
-      return Promise.resolve(null);
+      return fetch("/api/update/check")
+        .then((r) => r.json())
+        .then((resp: { ok?: boolean; data?: { available?: boolean } }) => {
+          if (resp.ok && resp.data?.available) return resp.data;
+          return null;
+        })
+        .catch(() => null);
+    }
+    if (
+      plugin === "updater" &&
+      (action === "download_and_install" || action === "downloadAndInstall")
+    ) {
+      return fetch("/api/update/download", { method: "POST" })
+        .then((r) => r.json())
+        .then((resp: { ok?: boolean; error?: string }) => {
+          if (!resp.ok) throw new Error(resp.error || "下载更新失败");
+          return fetch("/api/update/apply", { method: "POST" }).then((r) =>
+            r.json(),
+          );
+        })
+        .then((resp: { ok?: boolean; error?: string }) => {
+          if (!resp.ok) throw new Error(resp.error || "应用更新失败");
+          return null;
+        });
     }
     if (plugin === "updater") {
       return Promise.resolve();

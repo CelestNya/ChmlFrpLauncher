@@ -9,6 +9,7 @@ ChmlFrpLauncher 项目文档。
 | [plans/b1-fnos-daemon.md](plans/b1-fnos-daemon.md) | B1 实施计划（fnos-daemon crate：形态/契约/命令范围/验收/commit 点位） | 批次实施时逐项勾选 |
 | [plans/b2-fnos-shim-patch.md](plans/b2-fnos-shim-patch.md) | B2 实施计划（fnos-shim + UI patch：shim 契约/构建链/验收/已知降级） | 批次实施时逐项勾选 |
 | [plans/b3-fnos-pack.md](plans/b3-fnos-pack.md) | B3 实施计划（fnos-pack .fpk：manifest/生命周期/入口/验收） | 批次实施时逐项勾选 |
+| [plans/b5-fnos-update.md](plans/b5-fnos-update.md) | B5 实施计划（软件内自更新：GitHub Releases 源/校验/替换/重启） | 批次实施时逐项勾选 |
 
 ## 约定
 

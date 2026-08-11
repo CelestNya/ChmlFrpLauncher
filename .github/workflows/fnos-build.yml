@@ -69,9 +69,9 @@ jobs:
         run: |
           bash fnos-pack/apply-patches.sh
 
-      - name: Build .fpk
+      - name: Build .fpk + update bundle
         run: |
-          bash fnos-pack/build-fpk.sh --arch ${{ matrix.arch }} --skip-frontend
+          bash fnos-pack/build-fpk.sh --arch ${{ matrix.arch }} --skip-frontend --bundle
 
       - name: Upload .fpk artifact
         uses: actions/upload-artifact@v4
@@ -79,3 +79,34 @@ jobs:
           name: chmlfrp-fpk-${{ matrix.arch }}
           path: dist-fpk/*.fpk
           if-no-files-found: error
+
+      - name: Upload update bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chmlfrp-fnos-bundle-${{ matrix.arch }}
+          path: dist-fpk/chmlfrp-fnos-*.tar.gz
+          if-no-files-found: error
+
+  # 把更新 bundle 附加到 GitHub Release（daemon 自更新源 /api/update/check 拉取）
+  attach-bundles:
+    name: Attach fnOS update bundles to Release
+    needs: build-fnos
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all fnOS bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chmlfrp-fnos-bundle-*
+          merge-multiple: true
+          path: bundles
+
+      - name: Attach bundles to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for f in bundles/chmlfrp-fnos-*.tar.gz; do
+            gh release upload "$GITHUB_REF_NAME" "$f" --clobber
+            echo "已附加: $(basename "$f")"
+          done
