@@ -1,0 +1,15 @@
+appname         = chmlfrp
+version         = 0.7.5
+display_name    = ChmlFrp 内网穿透
+platform        = x86
+source          = thirdparty
+maintainer      = ChmlFrp Team
+maintainer_url  = https://www.chmlfrp.cn
+distributor     = ChmlFrpLauncher
+distributor_url = https://github.com/CelestNya/ChmlFrpLauncher
+desktop_uidir   = ui
+desktop_applaunchname = chmlfrp.Application
+service_port    = 17890
+ctl_stop        = true
+desc            = ChmlFrp 内网穿透客户端，管理 frpc 隧道映射与进程守护。
+checksum        =

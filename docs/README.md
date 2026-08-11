@@ -8,6 +8,7 @@ ChmlFrpLauncher 项目文档。
 | [fnos-porting-plan.md](fnos-porting-plan.md) | fnOS 移植整体 plan（决策记录 Q1-Q5 / 批次 B1-B5 / 待验证清单 / 风险） | grill 决议或批次实施推进时更新 |
 | [plans/b1-fnos-daemon.md](plans/b1-fnos-daemon.md) | B1 实施计划（fnos-daemon crate：形态/契约/命令范围/验收/commit 点位） | 批次实施时逐项勾选 |
 | [plans/b2-fnos-shim-patch.md](plans/b2-fnos-shim-patch.md) | B2 实施计划（fnos-shim + UI patch：shim 契约/构建链/验收/已知降级） | 批次实施时逐项勾选 |
+| [plans/b3-fnos-pack.md](plans/b3-fnos-pack.md) | B3 实施计划（fnos-pack .fpk：manifest/生命周期/入口/验收） | 批次实施时逐项勾选 |
 
 ## 约定
 

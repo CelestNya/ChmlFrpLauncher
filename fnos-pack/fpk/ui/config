@@ -1,0 +1,13 @@
+{
+    ".url": {
+        "chmlfrp.Application": {
+            "title": "ChmlFrp 内网穿透",
+            "icon": "images/{0}.png",
+            "type": "iframe",
+            "protocol": "http",
+            "port": "17890",
+            "url": "/",
+            "allUsers": true
+        }
+    }
+}

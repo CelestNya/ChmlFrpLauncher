@@ -1,0 +1,7 @@
+{
+    "port-config": {
+        "protocol-file": "ChmlFrp.sc"
+    },
+    "systemd-unit": {
+    }
+}
