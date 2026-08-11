@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # fnos-pack/build-fpk.sh
-# 构建 ChmlFrp fnOS .fpk 安装包（官方 fnpack 工具，替代手写 tar），并可额外生成自更新 bundle（--bundle）。
+# 构建 ChmlFrp fnOS .fpk 安装包（官方 fnpack 工具），并可额外生成自更新 bundle（--bundle）。
 #
-# 流程：前端（apply-patches.sh：patch → tsc → vite → shim）→ daemon release 编译 →
+# 流程：前端（apply-patches.sh：patch → tsc → vite → shim）→ daemon musl 静态编译 →
 #       组装 fnpack 项目目录（app/ + cmd/ + config/ + wizard/ + manifest + 图标）→ fnpack build 出 .fpk
+#
+# ⚠️ daemon 必须 musl 静态编译：fnOS 基于 Debian 12（glibc 2.36），gnu 动态链接二进制
+#    若要求更高 GLIBC 版本会在真机加载即崩（白屏/闪退）。已实测验证。
 #
 # 用法（Linux / WSL / CI）：
 #   bash fnos-pack/build-fpk.sh                # 自动检测架构（x86_64→x86，aarch64→arm）
@@ -16,8 +19,8 @@
 #   - CI：建议用 mengzhuo/setup-fnpack action 提供 fnpack
 #
 # 交叉编译 aarch64 需要：
-#   sudo apt install gcc-aarch64-linux-gnu
-#   rustup target add aarch64-unknown-linux-gnu
+#   sudo apt install musl-tools gcc-aarch64-linux-gnu
+#   rustup target add aarch64-unknown-linux-musl
 #   （daemon 已用 rustls，无需交叉 openssl）
 #
 # 产物：dist-fpk/chmlfrp_<version>_<platform>.fpk
@@ -97,20 +100,27 @@ else
     OUTPUT_DIR="$REPO_ROOT/dist-fnos" bash "$REPO_ROOT/fnos-pack/apply-patches.sh"
 fi
 
-# ---------- 2. 编译 daemon ----------
-echo "[fnos-pack] ② 编译 daemon ($RUST_TARGET, release)…"
+# ---------- 2. 编译 daemon（musl 静态，兼容 fnOS glibc 2.36） ----------
+echo "[fnos-pack] ② 编译 daemon ($RUST_TARGET, musl 静态)…"
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/fnos-daemon/target}"
-if [ "$RUST_TARGET" = "x86_64-unknown-linux-gnu" ] && [ "$(uname -m)" = "x86_64" ]; then
-    # 原生编译
-    cargo build --release --manifest-path "$REPO_ROOT/fnos-daemon/Cargo.toml"
-    DAEMON_BIN="$CARGO_TARGET_DIR/release/chmlfrp-daemon"
-else
-    # 交叉编译（需 rustup target add + 系统交叉工具链）
-    rustup target add "$RUST_TARGET" 2>/dev/null || true
-    # rustls 已消除 openssl 依赖，仅需交叉 C 链接器（gcc-aarch64-linux-gnu）
-    export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER:-aarch64-linux-gnu-gcc}"
-    cargo build --release --target "$RUST_TARGET" --manifest-path "$REPO_ROOT/fnos-daemon/Cargo.toml"
-    DAEMON_BIN="$CARGO_TARGET_DIR/$RUST_TARGET/release/chmlfrp-daemon"
+case "$RUST_TARGET" in
+    x86_64-unknown-linux-gnu)
+        MUSL_TARGET="x86_64-unknown-linux-musl"
+        # cargo 对 x86_64 musl 会自动找 x86_64-linux-musl-gcc（musl-tools 提供）
+        ;;
+    aarch64-unknown-linux-gnu)
+        MUSL_TARGET="aarch64-unknown-linux-musl"
+        # 交叉 musl 需要 aarch64-linux-musl-gcc（如 musl.cc 工具链）
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER:-aarch64-linux-musl-gcc}"
+        ;;
+esac
+rustup target add "$MUSL_TARGET" 2>/dev/null || true
+cargo build --release --target "$MUSL_TARGET" --manifest-path "$REPO_ROOT/fnos-daemon/Cargo.toml"
+DAEMON_BIN="$CARGO_TARGET_DIR/$MUSL_TARGET/release/chmlfrp-daemon"
+# 校验静态链接（防止误用 gnu 产物）
+if ! file "$DAEMON_BIN" | grep -q "statically linked"; then
+    echo "[fnos-pack] ❌ daemon 非静态链接，拒绝打包" >&2
+    exit 1
 fi
 [ -f "$DAEMON_BIN" ] || { echo "[fnos-pack] ❌ daemon 二进制未生成: $DAEMON_BIN" >&2; exit 1; }
 
