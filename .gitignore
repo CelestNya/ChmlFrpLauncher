@@ -24,3 +24,6 @@ src-tauri/frpc.ini
 *.sln
 *.sw?
 package-lock.json
+# fnOS 构建产物与工具目录
+dist-fnos
+.zcode/

@@ -7,6 +7,7 @@ ChmlFrpLauncher 项目文档。
 | [architecture.md](architecture.md) | 当前架构完整描述（系统全貌 / Rust 后端 / 前端 / 外部契约 / 事件通道 / 存储 / 可观测性 / 待商榷） | 架构发生实质变更时（新模块、契约变化、形态演进），由变更作者同步更新 |
 | [fnos-porting-plan.md](fnos-porting-plan.md) | fnOS 移植整体 plan（决策记录 Q1-Q5 / 批次 B1-B5 / 待验证清单 / 风险） | grill 决议或批次实施推进时更新 |
 | [plans/b1-fnos-daemon.md](plans/b1-fnos-daemon.md) | B1 实施计划（fnos-daemon crate：形态/契约/命令范围/验收/commit 点位） | 批次实施时逐项勾选 |
+| [plans/b2-fnos-shim-patch.md](plans/b2-fnos-shim-patch.md) | B2 实施计划（fnos-shim + UI patch：shim 契约/构建链/验收/已知降级） | 批次实施时逐项勾选 |
 
 ## 约定
 
