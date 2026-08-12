@@ -4,6 +4,31 @@
 //! C3 由 /ws/logs 订阅转发（事件名与载荷与桌面版一致，shim 透传无感）。
 
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+
+/// frpc 日志环形缓冲：WS 断线（网关空闲超时）重连后补发，避免断线窗口日志丢失。
+/// 元素为已序列化的 Event JSON 字符串（ws.rs 直接透发，零重复序列化）。
+pub type LogHistory = Arc<Mutex<VecDeque<String>>>;
+/// 缓冲容量：断线窗口最长约 60s，日志密集时保留最近的即可。
+pub const LOG_HISTORY_CAP: usize = 512;
+
+/// 将事件帧写入历史缓冲（只缓存 frpc-log；download-progress 等高频事件不缓存，
+/// 否则会冲掉日志帧）。
+pub fn push_log_history(history: &LogHistory, event: &Event) {
+    if event.event_type != "frpc-log" {
+        return;
+    }
+    let Ok(json) = serde_json::to_string(event) else {
+        return;
+    };
+    if let Ok(mut h) = history.lock() {
+        if h.len() >= LOG_HISTORY_CAP {
+            h.pop_front();
+        }
+        h.push_back(json);
+    }
+}
 
 /// 日志消息（与桌面版 models::LogMessage 载荷一致）。
 #[derive(Serialize, Deserialize, Clone, Debug)]

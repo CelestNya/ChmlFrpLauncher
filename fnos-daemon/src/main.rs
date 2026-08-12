@@ -25,11 +25,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use custom::CustomManager;
-use events::Event;
+use events::{Event, LogHistory};
 use frpc::FrpcManager;
 use guard::GuardState;
+use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tracing::info;
 
@@ -40,6 +41,8 @@ pub struct AppState {
     pub custom: Arc<CustomManager>,
     pub guard: Arc<GuardState>,
     pub events: broadcast::Sender<Event>,
+    /// frpc 日志环形缓冲（WS 断线重连补发）
+    pub log_history: LogHistory,
     pub update: update::UpdateChecker,
     /// 自更新 / 终止信号广播（触发 serve 优雅退出）
     pub shutdown: broadcast::Sender<()>,
@@ -120,7 +123,9 @@ fn build_listener(addr: std::net::SocketAddr) -> std::io::Result<tokio::net::Tcp
     }
     #[cfg(not(unix))]
     {
-        tokio::net::TcpListener::bind(addr).await
+        let socket = std::net::TcpListener::bind(addr)?;
+        socket.set_nonblocking(true)?;
+        tokio::net::TcpListener::from_std(socket)
     }
 }
 
@@ -149,7 +154,14 @@ async fn main() {
     let (shutdown_tx, _) = broadcast::channel(1);
     let shutdown_tx_for_signal = shutdown_tx.clone();
     let guard = GuardState::new(); // D1：守护默认开启
-    let frpc = Arc::new(FrpcManager::new(cfg.data_dir.clone(), event_tx.clone(), guard.clone()));
+    // frpc 日志环形缓冲（WS 断线重连补发，容量见 events::LOG_HISTORY_CAP）
+    let log_history: LogHistory = Arc::new(Mutex::new(VecDeque::new()));
+    let frpc = Arc::new(FrpcManager::new(
+        cfg.data_dir.clone(),
+        event_tx.clone(),
+        log_history.clone(),
+        guard.clone(),
+    ));
     let custom = Arc::new(CustomManager::new(frpc.clone()));
 
     // 恢复仍在运行的隧道进程（仅记录与日志，守护接管见 guard.rs）
@@ -162,6 +174,7 @@ async fn main() {
     guard::start_guard_monitor(guard.clone(), frpc.clone(), custom.clone(), event_tx.clone());
 
     let mut shutdown_rx_tcp = shutdown_tx.subscribe();
+    #[cfg(unix)]
     let mut shutdown_rx_socket = shutdown_tx.subscribe();
     let state = AppState {
         cfg: Arc::new(cfg.clone()),
@@ -169,6 +182,7 @@ async fn main() {
         custom,
         guard,
         events: event_tx,
+        log_history,
         update: update::UpdateChecker::default(),
         shutdown: shutdown_tx,
     };
@@ -214,6 +228,7 @@ async fn main() {
     let shutdown_task_tcp = async move {
         let _ = shutdown_rx_tcp.recv().await;
     };
+    #[cfg(unix)]
     let shutdown_task_socket = async move {
         let _ = shutdown_rx_socket.recv().await;
     };
@@ -223,7 +238,8 @@ async fn main() {
     let tcp_serve = axum::serve(listener, gateway_app.clone())
         .with_graceful_shutdown(shutdown_task_tcp);
 
-    // 统一网关 unix socket（TRIM_APPDEST/app.sock）
+    // 统一网关 unix socket（TRIM_APPDEST/app.sock）——仅 unix 平台存在
+    #[cfg(unix)]
     let socket_task = async {
         if let Some(sock_path) = cfg.gateway_socket_path() {
             // 清理旧 socket 文件（重启衔接）
@@ -239,6 +255,11 @@ async fn main() {
             info!("未设置 TRIM_APPDEST，跳过网关 socket 监听");
             std::future::pending::<()>().await;
         }
+    };
+    #[cfg(not(unix))]
+    let socket_task = async {
+        info!("非 unix 平台，跳过网关 socket 监听");
+        std::future::pending::<()>().await;
     };
 
     tokio::select! {

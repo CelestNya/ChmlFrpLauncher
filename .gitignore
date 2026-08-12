@@ -30,3 +30,7 @@ dist-fnos
 dist-fpk
 # daemon 本地开发默认数据目录
 data
+
+# fnos 构建缓存与 pnpm 残留（勿提交）
+.fnpack-cache/
+pnpm-workspace.yaml

@@ -4,7 +4,7 @@
 //! 仅将 tauri 类型（AppHandle / State / Emitter）替换为 daemon 自有依赖：
 //! 数据目录 / 进程表 / broadcast 事件通道）。
 
-use crate::events::{Event, LogMessage};
+use crate::events::{push_log_history, Event, LogHistory, LogMessage};
 use crate::guard::{self, GuardState};
 use crate::persist::Persistence;
 use serde::Deserialize;
@@ -50,6 +50,7 @@ pub struct FrpcManager {
     pub processes: Mutex<HashMap<i32, Child>>,
     pub persistence: Persistence,
     pub events: broadcast::Sender<Event>,
+    pub log_history: LogHistory,
     pub guard: Arc<GuardState>,
 }
 
@@ -57,6 +58,7 @@ impl FrpcManager {
     pub fn new(
         data_dir: PathBuf,
         events: broadcast::Sender<Event>,
+        log_history: LogHistory,
         guard: Arc<GuardState>,
     ) -> Self {
         Self {
@@ -64,11 +66,15 @@ impl FrpcManager {
             processes: Mutex::new(HashMap::new()),
             persistence: Persistence::new(&data_dir),
             events,
+            log_history,
             guard,
         }
     }
 
-    fn emit(&self, event: Event) {
+    /// 发布日志事件：写历史缓冲（WS 断线补发）+ 广播实时推送。
+    pub fn emit_log(&self, msg: LogMessage) {
+        let event = Event::log(msg);
+        push_log_history(&self.log_history, &event);
         let _ = self.events.send(event);
     }
 
@@ -149,18 +155,19 @@ impl FrpcManager {
         let pid = child.id();
 
         let timestamp = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
-        self.emit(Event::log(LogMessage {
+        self.emit_log(LogMessage {
             tunnel_id,
             message: format!(
                 "[I] [ChmlFrpLauncher] frpc 进程已启动 (PID: {}), 开始连接服务器...",
                 pid
             ),
             timestamp,
-        }));
+        });
 
         if let Some(stdout) = child.stdout.take() {
             spawn_log_reader(
                 self.events.clone(),
+                self.log_history.clone(),
                 tunnel_id,
                 user_token.clone(),
                 node_token.clone(),
@@ -171,6 +178,7 @@ impl FrpcManager {
         if let Some(stderr) = child.stderr.take() {
             spawn_log_reader(
                 self.events.clone(),
+                self.log_history.clone(),
                 tunnel_id,
                 user_token,
                 node_token,
@@ -319,10 +327,15 @@ impl FrpcManager {
     }
 }
 
-/// 日志管道：逐行剥离 ANSI → token 脱敏 → 打时间戳 → 推事件。
+/// 日志管道：逐行剥离 ANSI → token 脱敏 → 打时间戳 → 写历史缓冲 → 推事件。
+///
+/// ⚠️ send 失败**不能**退出循环：网关空闲超时会周期性断开 WS（fnOS 实测约 60s），
+/// 断线窗口内 broadcast 无订阅者、send 返回 Err；若此时退出，日志线程将永久死亡，
+/// 重连后 frpc 输出也永远不会再推送。事件丢弃可接受，线程必须存活。
 /// （pub(crate)：custom.rs 复用，传空 secret 即不脱敏。）
 pub(crate) fn spawn_log_reader(
     events: broadcast::Sender<Event>,
+    log_history: LogHistory,
     tunnel_id: i32,
     user_token: String,
     node_token: String,
@@ -353,16 +366,13 @@ pub(crate) fn spawn_log_reader(
                     sanitized_line
                 };
 
-                if events
-                    .send(Event::log(LogMessage {
-                        tunnel_id,
-                        message,
-                        timestamp,
-                    }))
-                    .is_err()
-                {
-                    break;
-                }
+                let event = Event::log(LogMessage {
+                    tunnel_id,
+                    message,
+                    timestamp,
+                });
+                push_log_history(&log_history, &event);
+                let _ = events.send(event);
             }
         })
     {

@@ -122,6 +122,13 @@ async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Va
             let data = state.frpc.persistence.get_running_tunnels();
             Ok(json!(data))
         }
+        // fnOS 内部命令：清空 WS 补发缓冲（前端"清空日志"联动，避免刷新后补发旧日志）
+        "clear_log_history" => {
+            if let Ok(mut history) = state.log_history.lock() {
+                history.clear();
+            }
+            Ok(json!(true))
+        }
         "stop_orphan_process" => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]

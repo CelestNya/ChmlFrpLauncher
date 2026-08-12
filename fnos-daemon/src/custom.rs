@@ -4,7 +4,7 @@
 //! 复用 FrpcManager 的进程表 / 持久化 / 事件通道 / 守护状态；
 //! 进程表 key 为隧道 id 的哈希（string_to_i32，算法必须与桌面版一致）。
 
-use crate::events::{Event, LogMessage};
+use crate::events::LogMessage;
 use crate::frpc::{self, FrpcManager};
 use crate::guard;
 use serde::{Deserialize, Serialize};
@@ -301,18 +301,19 @@ impl CustomManager {
         let pid = child.id();
 
         let timestamp = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
-        let _ = self.frpc.events.send(Event::log(LogMessage {
+        self.frpc.emit_log(LogMessage {
             tunnel_id: tunnel_id_hash,
             message: format!(
                 "[I] [ChmlFrpLauncher] 自定义隧道 {} 进程已启动 (PID: {})",
                 tunnel_id, pid
             ),
             timestamp,
-        }));
+        });
 
         if let Some(stdout) = child.stdout.take() {
             frpc::spawn_log_reader(
                 self.frpc.events.clone(),
+                self.frpc.log_history.clone(),
                 tunnel_id_hash,
                 String::new(),
                 String::new(),
@@ -323,6 +324,7 @@ impl CustomManager {
         if let Some(stderr) = child.stderr.take() {
             frpc::spawn_log_reader(
                 self.frpc.events.clone(),
+                self.frpc.log_history.clone(),
                 tunnel_id_hash,
                 String::new(),
                 String::new(),

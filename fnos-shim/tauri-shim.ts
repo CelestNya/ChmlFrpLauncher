@@ -72,7 +72,7 @@
       };
 
       ws.onmessage = (ev) => {
-        let frame: { type?: string; payload?: unknown };
+        let frame: { type?: string; payload?: unknown; replay?: boolean };
         try {
           frame = JSON.parse(ev.data as string);
         } catch {
@@ -84,6 +84,8 @@
         const eventData = {
           event: frame.type,
           id: Date.now(),
+          // daemon 补发帧带 replay 标记：前端通知逻辑据此跳过（日志照常显示）
+          replay: frame.replay === true,
           payload: frame.payload,
         };
         ids.forEach((id) => runCallback(id, eventData));
@@ -126,11 +128,13 @@
     // 事件监听（@tauri-apps/api/event 的 listen/once）
     if (plugin === "event" && action === "listen") {
       const event = args.event as string;
+      // ⚠️ 必须用 args.handler（transformCallback 注册到 callbacks 表的 ID）作为
+      // 事件监听 ID：WS 帧到达时 runCallback(该 ID) 才能查到回调。曾误用自增
+      // eventId 导致帧被静默丢弃（浏览器收到帧但前端无日志）。
       const handler = args.handler as number;
-      const eventId = nextId++;
       if (!eventListeners.has(event)) eventListeners.set(event, new Set());
-      eventListeners.get(event)!.add(eventId);
-      return Promise.resolve(eventId);
+      eventListeners.get(event)!.add(handler);
+      return Promise.resolve(handler);
     }
 
     if (plugin === "event" && action === "unlisten") {
@@ -268,9 +272,48 @@
 
     // 文件对话框
     if (plugin === "dialog" && action === "open") {
-      // fnOS 下无法返回真实路径；直接返回 null（视为用户取消）。
-      // 背景图片选择等依赖真实路径的命令在 daemon 侧为 NO_OP，后续再补。
-      return Promise.resolve(null);
+      // fnOS 浏览器环境：用浏览器原生文件选框替代 tauri 对话框。
+      // 返回 dataURL 字符串（前端 getBackgroundType 原生识别 data:image/ 前缀，
+      // 渲染链路无前缀时直接当 src 使用），前端 useBackgroundImage 有 __FNOS__
+      // 分支跳过 daemon 拷贝。
+      // 限制 2MB：dataURL base64 膨胀 ~33%，且存 localStorage（Chrome 每项 5MB）。
+      if (args.directory === true) {
+        // 文件夹选择暂不支持（浏览器无法返回目录路径），保持取消语义
+        return Promise.resolve(null);
+      }
+      return new Promise((resolve) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "image/*";
+        // settled 保证只 resolve 一次（onchange / cancel / focus 兜底竞争）
+        let settled = false;
+        const finish = (value: string | null) => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        };
+        input.onchange = () => {
+          const file = input.files?.[0];
+          if (!file) {
+            finish(null);
+            return;
+          }
+          if (file.size > 2 * 1024 * 1024) {
+            window.alert("图片过大（>2MB），请选择更小的图片");
+            finish(null);
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => finish((reader.result as string) || null);
+          reader.onerror = () => finish(null);
+          reader.readAsDataURL(file);
+        };
+        // 用户取消（Esc / 点击关闭文件框）：Chromium 113+ 触发 cancel 事件。
+        // ⚠️ 不要用 window focus 做兜底：文件框关闭时 focus 先于 change 触发，
+        // 会把正常选中的图片也 cancel 掉（实测翻车）。
+        input.addEventListener("cancel", () => finish(null));
+        input.click();
+      });
     }
     if (plugin === "dialog" && action === "save") {
       // 返回占位路径，write_text_file 降级为下载
@@ -318,6 +361,9 @@
   const w = window as unknown as Record<string, unknown>;
   w.__TAURI_INTERNALS__ = TAURI_INTERNALS;
   w.__TAURI__ = true;
+  // fnOS 专属标记：桌面版 Tauri 也有 __TAURI__/__TAURI_INTERNALS__，
+  // 前端需要区分 fnOS 浏览器环境时用本标记（如背景图 dataURL 分支）
+  w.__FNOS__ = true;
   w.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
     unregisterListener: (event: string, eventId: number) => {
       const set = eventListeners.get(event);

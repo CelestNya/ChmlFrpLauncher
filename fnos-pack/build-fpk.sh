@@ -73,7 +73,7 @@ ensure_fnpack() {
             Darwin-arm64) os_arch="darwin-arm64" ;;
             *) echo "不支持的 fnpack 平台: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
         esac
-        echo "[fnpack] 下载 fnpack 1.2.3 ($os_arch)…"
+        echo "[fnpack] 下载 fnpack 1.2.3 ($os_arch)…" >&2
         for _ in 1 2 3; do
             curl -fsSL -o "$bin" "https://static2.fnnas.com/fnpack/fnpack-1.2.3-${os_arch}" && [ -s "$bin" ] && break
             echo "[fnpack] 下载失败，重试…" >&2
@@ -117,8 +117,8 @@ esac
 rustup target add "$MUSL_TARGET" 2>/dev/null || true
 cargo build --release --target "$MUSL_TARGET" --manifest-path "$REPO_ROOT/fnos-daemon/Cargo.toml"
 DAEMON_BIN="$CARGO_TARGET_DIR/$MUSL_TARGET/release/chmlfrp-daemon"
-# 校验静态链接（防止误用 gnu 产物）
-if ! file "$DAEMON_BIN" | grep -q "statically linked"; then
+# 校验静态链接（防止误用 gnu 产物；新版 rustc 默认 static-pie，两者均无 glibc 依赖）
+if ! file "$DAEMON_BIN" | grep -Eq "statically linked|static-pie linked"; then
     echo "[fnos-pack] ❌ daemon 非静态链接，拒绝打包" >&2
     exit 1
 fi

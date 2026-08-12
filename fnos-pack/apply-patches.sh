@@ -14,6 +14,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PATCH_FILE="$REPO_ROOT/fnos-pack/patches/fnos-ui-patch.patch"
+FEATURE_PATCH_FILE="$REPO_ROOT/fnos-pack/patches/fnos-feature-patch.patch"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/dist-fnos}"
 TMP_WORK="$(mktemp -d)"
 trap 'rm -rf "$TMP_WORK"' EXIT
@@ -23,6 +24,8 @@ cp -r "$REPO_ROOT/src" "$TMP_WORK/src"
 cp "$REPO_ROOT/package.json" "$REPO_ROOT/index.html" "$REPO_ROOT/tsconfig.json" \
    "$REPO_ROOT/tsconfig.app.json" "$REPO_ROOT/tsconfig.node.json" \
    "$REPO_ROOT/vite.config.ts" "$TMP_WORK/" 2>/dev/null || true
+# public/ 静态资源（音效 mp3 等）：不复制则 vite 构建产物缺文件
+cp -r "$REPO_ROOT/public" "$TMP_WORK/public" 2>/dev/null || true
 
 # patch 可能涉及的文件（其余依赖源码文件保持原样）
 for f in \
@@ -35,13 +38,18 @@ done
 
 echo "[fnos-pack] 预检 patch（--dry-run）…"
 if ! patch -p1 --dry-run -d "$TMP_WORK" < "$PATCH_FILE"; then
-  echo "[fnos-pack] ❌ patch 预检失败：请更新 fnos-pack/patches/fnos-ui-patch.patch 以匹配当前 src/" >&2
+  echo "[fnos-pack] ❌ UI patch 预检失败：请更新 fnos-pack/patches/fnos-ui-patch.patch 以匹配当前 src/" >&2
+  exit 1
+fi
+if ! patch -p1 --dry-run -d "$TMP_WORK" < "$FEATURE_PATCH_FILE"; then
+  echo "[fnos-pack] ❌ feature patch 预检失败：请更新 fnos-pack/patches/fnos-feature-patch.patch 以匹配当前 src/" >&2
   exit 1
 fi
 
 echo "[fnos-pack] 应用 patch…"
 patch -p1 -d "$TMP_WORK" < "$PATCH_FILE"
-echo "[fnos-pack] ✅ patch 应用成功"
+patch -p1 -d "$TMP_WORK" < "$FEATURE_PATCH_FILE"
+echo "[fnos-pack] ✅ patch 应用成功（ui + feature）"
 
 # 验证：fnOS 已移除的元素不应再出现在源码副本中；保留元素应仍在
 if grep -q "TitleBar" "$TMP_WORK/src/App.tsx"; then
@@ -53,6 +61,17 @@ if grep -q "AntivirusWarningDialog" "$TMP_WORK/src/App.tsx"; then
   exit 1
 fi
 echo "[fnos-pack] ✅ UI 精简验证通过（TitleBar / 杀软警告已移除）"
+
+# 验证 feature patch 关键修复已应用（fnOS 专属逻辑存在性）
+if ! grep -q "__FNOS__" "$TMP_WORK/src/components/pages/Settings/hooks/useBackgroundImage.ts"; then
+  echo "[fnos-pack] ❌ feature patch 未生效：useBackgroundImage.ts 缺 __FNOS__" >&2
+  exit 1
+fi
+if ! grep -q "replay" "$TMP_WORK/src/components/App/hooks/useTunnelNotifications.ts"; then
+  echo "[fnos-pack] ❌ feature patch 未生效：useTunnelNotifications.ts 缺 replay" >&2
+  exit 1
+fi
+echo "[fnos-pack] ✅ feature patch 验证通过（__FNOS__ / replay 存在）"
 
 echo "[fnos-pack] 构建前端…"
 (

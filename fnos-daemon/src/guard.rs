@@ -88,7 +88,7 @@ pub fn start_guard_monitor(
                 Ok(event) = rx.recv() => {
                     if let Event { event_type: "frpc-log", payload } = event {
                         if let Ok(log) = serde_json::from_value::<LogMessage>(payload) {
-                            check_log_and_stop_guard(&guard, &events, log).await;
+                            check_log_and_stop_guard(&guard, &frpc, log).await;
                         }
                     }
                 }
@@ -133,11 +133,13 @@ async fn tick(
             continue;
         }
 
-        let _ = events.send(Event::log(LogMessage {
+        // 走 emit_log（缓冲+广播）：若用裸 events.send，断线窗口内（无 WS 订阅者）
+        // 守护消息会丢失，且不进补发缓冲。与 frpc 日志行为保持一致。
+        frpc.emit_log(LogMessage {
             tunnel_id,
             message: "[W] [ChmlFrpLauncher] 检测到进程离线，触发守护进程，自动重启中".to_string(),
             timestamp: get_timestamp(),
-        }));
+        });
 
         restart_tunnel(guard, frpc, custom, events, info).await;
     }
@@ -172,11 +174,11 @@ async fn restart_tunnel(
             }));
         }
         Err(e) => {
-            let _ = events.send(Event::log(LogMessage {
+            frpc.emit_log(LogMessage {
                 tunnel_id,
                 message: format!("[E] [ChmlFrpLauncher] 守护进程重启失败: {}", e),
                 timestamp: get_timestamp(),
-            }));
+            });
 
             if let Ok(mut guarded) = guard.guarded_processes.lock() {
                 guarded.remove(&tunnel_id);
@@ -201,7 +203,7 @@ fn is_manually_stopped(guard: &Arc<GuardState>, tunnel_id: i32) -> bool {
 /// （桌面版日志管道只读子进程输出，天然无此问题；daemon 的事件消费者订阅整个广播通道）。
 async fn check_log_and_stop_guard(
     guard: &Arc<GuardState>,
-    events: &broadcast::Sender<Event>,
+    frpc: &Arc<FrpcManager>,
     log: LogMessage,
 ) {
     if log.message.contains("[ChmlFrpLauncher]") {
@@ -222,14 +224,14 @@ async fn check_log_and_stop_guard(
         }
     }
 
-    let _ = events.send(Event::log(LogMessage {
+    frpc.emit_log(LogMessage {
         tunnel_id: log.tunnel_id,
         message: format!(
             "[W] [ChmlFrpLauncher] 检测到错误 \"{}\"，已停止守护进程",
             pattern
         ),
         timestamp: get_timestamp(),
-    }));
+    });
 }
 
 // ---- invoke 命令实现（薄胶水，操作 GuardState） ----
