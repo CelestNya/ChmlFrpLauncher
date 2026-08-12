@@ -19,10 +19,10 @@ jobs:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
-    # aarch64 musl 链接器（zig cc；x86_64 不使用，无副作用）
+    # aarch64 musl 链接器（zig cc + wrapper；x86_64 不使用，无副作用）
     env:
-      CC_aarch64_unknown_linux_musl: "zig cc -target aarch64-linux-musl"
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: "zig cc -target aarch64-linux-musl"
+      CC_aarch64_unknown_linux_musl: "zigcc"
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: "zigcc"
 
     steps:
       - name: Checkout
@@ -72,11 +72,21 @@ jobs:
       - name: Setup zig (aarch64 musl linker)
         if: matrix.arch == 'aarch64'
         run: |
-          # zig 0.12.1：ring 0.17 的编译探测兼容（0.13 裸 `zig -E` 报 UnknownOperatingSystem）
+          # zig 0.12.1 + gcc 兼容 wrapper：
+          # ring 探测用 `zig -E`（带 rustc 风格 -target 三字段，zig 不认），
+          # wrapper 把 target 参数转成 zig 格式（aarch64-unknown-linux-musl → aarch64-linux-musl）
           curl -fsSL -o /tmp/zig.tar.xz https://ziglang.org/download/0.12.1/zig-linux-x86_64-0.12.1.tar.xz
           tar xf /tmp/zig.tar.xz -C /tmp
           /tmp/zig-linux-x86_64-0.12.1/zig version
-          echo "/tmp/zig-linux-x86_64-0.12.1" >> "$GITHUB_PATH"
+
+          ZIG_BIN=/tmp/zig-linux-x86_64-0.12.1/zig
+          mkdir -p /tmp/zig-wrapper
+          # wrapper 内容经 base64 写入（避免 heredoc 在 YAML run 块的缩进解析问题）
+          WRAPPER_B64=$(echo "IyEvdXNyL2Jpbi9lbnYgYmFzaAojaGVyZWRvYyBlbmQKIyB6aWcgY2MgZ2NjIGNvbXBhdGlibGUgd3JhcHBlcjogY29udmVydCBydXN0YyBzdHlsZSB0YXJnZXQgdG8gemlnIGZvcm1hdAphcmdzPSgKZm9yIGEgaW4gIiRAIjsgZG8KICBpZiBbWyAiJGEiID09ICJhYXJjaDY0LXVua25vd24tbGludXgtbXVzbCIgXV07IHRoZW4KICAgIGFyZ3MrPSgiYWFyY2g2NC1saW51eC1tdXNsIikKICBlbHNlCiAgICBhcmdzKz0oIiRhIikKICBmaQpkb25lCmV4ZWMgL3RtcC96aWctbGludXgteDg2XzY0LTAuMTIuMS96aWcgY2MgIiR7YXJnc1tAXX0iCiM=")
+          echo "$WRAPPER_B64" | base64 -d > /tmp/zig-wrapper/zigcc
+          chmod +x /tmp/zig-wrapper/zigcc
+          /tmp/zig-wrapper/zigcc -v >/dev/null 2>&1 && echo "zigcc wrapper OK"
+          echo "/tmp/zig-wrapper" >> "$GITHUB_PATH"
 
       # 官方 fnpack 打包工具（build-fpk.sh 内部也有自动下载兜底）
       - name: Setup fnpack
