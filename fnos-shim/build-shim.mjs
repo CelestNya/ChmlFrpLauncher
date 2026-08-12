@@ -92,14 +92,11 @@ const ESBUILD = findEsbuildBin();
 
 function compileShim() {
   // 无 import/export 的 IIFE 文件，--format=esm 原样输出（仅做 TS→JS + minify）
-  const args = [
-    ESBUILD.bin,
-    shimSrc,
-    "--format=esm",
-    "--minify",
-    "--target=es2017",
-  ];
-  return execFileSync(ESBUILD.useNode ? process.execPath : ESBUILD.bin, args, {
+  const esbuildArgs = [shimSrc, "--format=esm", "--minify", "--target=es2017"];
+  // 原生二进制直接运行；JS 包装需经 node 运行
+  const bin = ESBUILD.useNode ? process.execPath : ESBUILD.bin;
+  const args = ESBUILD.useNode ? [ESBUILD.bin, ...esbuildArgs] : esbuildArgs;
+  return execFileSync(bin, args, {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
