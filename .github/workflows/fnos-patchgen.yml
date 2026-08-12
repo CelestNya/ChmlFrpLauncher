@@ -62,15 +62,21 @@ jobs:
             exit 0
           fi
 
-          # 基于 origin/main 建临时分支，只取 patch 产物（不带走 src/ 改动）
-          # gen-patch.sh 就地改写了 patches 文件（未提交），丢弃避免切换分支被挡
+          # 基于 origin/main 建临时分支，携带 Generate patches 步骤生成的 patch
+          # 切分支会覆盖工作树，先把生成物复制到 /tmp，切完再恢复
+          mkdir -p /tmp/genout
+          cp "$PATCH_DIR"/fnos-*.patch /tmp/genout/
+          cp fnos-pack/gen-patch.sh /tmp/genout/
+          # 丢弃工作树其余改动，避免切换分支被挡
           git checkout -- . 2>/dev/null || true
           git clean -fd 2>/dev/null || true
-          # 固定分支名 + force push：每次只保留一条分支/一个 PR，避免临时分支积累
           BRANCH="fnos-patch"
           git branch -D "$BRANCH" 2>/dev/null || true
           git checkout -b "$BRANCH" origin/main
-          git checkout patcher -- "$PATCH_DIR" fnos-pack/gen-patch.sh
+          # 恢复生成的 patch 到新分支并提交
+          mkdir -p "$PATCH_DIR"
+          cp /tmp/genout/fnos-*.patch "$PATCH_DIR/"
+          cp /tmp/genout/gen-patch.sh fnos-pack/gen-patch.sh
           git add "$PATCH_DIR" fnos-pack/gen-patch.sh
           git -c user.name='fnos-bot' -c user.email='fnos-bot@users.noreply.github.com' \
             commit -m "chore(fnos): 自动生成 fnOS patch（来自 patcher 分支）"
