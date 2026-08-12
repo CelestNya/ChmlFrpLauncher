@@ -68,9 +68,7 @@ jobs:
           git checkout patcher -- "$PATCH_DIR" fnos-pack/gen-patch.sh
           git add "$PATCH_DIR" fnos-pack/gen-patch.sh
           git -c user.name='fnos-bot' -c user.email='fnos-bot@users.noreply.github.com' \
-            commit -m "chore(fnos): 自动生成 fnOS patch（来自 patcher 分支）
-
-patch 由 patcher 分支相对上游 main 的差异生成，请 review 后合并。"
+            commit -m "chore(fnos): 自动生成 fnOS patch（来自 patcher 分支）"
 
           git push origin "$BRANCH"
 
@@ -84,10 +82,5 @@ patch 由 patcher 分支相对上游 main 的差异生成，请 review 后合并
             --base main \
             --head "$BRANCH" \
             --title "chore(fnos): 更新 fnOS patch（自动生成）" \
-            --body "由 patcher 分支自动生成的 fnOS 前端 patch 更新。
-
-**来源**: \`patcher\` 分支 @ $(git rev-parse --short patcher)
-**基线**: 上游 main @ $(git rev-parse --short origin/main)
-
-仅改动 \`fnos-pack/patches/\`（+ gen-patch.sh），不涉及 src/。请 review 后合并。"
+            --body "由 patcher 分支自动生成的 fnOS 前端 patch 更新。来源: patcher@$(git rev-parse --short patcher)，基线: 上游 main@$(git rev-parse --short origin/main)。仅改动 fnos-pack/patches/（+ gen-patch.sh），不涉及 src/。请 review 后合并。"
           echo "✅ 已创建 PR: $(gh pr view --json url -q .url)"
