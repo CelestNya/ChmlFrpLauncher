@@ -83,8 +83,8 @@ jobs:
 
           git push origin "$BRANCH" --force
 
-          # 若同源 PR 已存在则跳过（幂等）
-          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' || true)
+          # 若同源 PR 已存在则跳过（幂等；--head 需带仓库前缀否则匹配不到）
+          EXISTING=$(gh pr list --repo CelestNya/ChmlFrpLauncher --head "$BRANCH" --state open --json number -q '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
             echo "已存在 PR #$EXISTING，跳过创建"
             exit 0
