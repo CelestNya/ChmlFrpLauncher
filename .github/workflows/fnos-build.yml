@@ -72,7 +72,7 @@ jobs:
       - name: Setup zig (aarch64 musl linker)
         if: matrix.arch == 'aarch64'
         run: |
-          curl -fsSL -o /tmp/zig.tar.xz https://github.com/ziglang/zig/releases/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
+          curl -fsSL -o /tmp/zig.tar.xz https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
           tar xf /tmp/zig.tar.xz -C /tmp
           /tmp/zig-linux-x86_64-0.13.0/zig version
           echo "/tmp/zig-linux-x86_64-0.13.0" >> "$GITHUB_PATH"
