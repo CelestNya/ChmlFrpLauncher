@@ -63,6 +63,9 @@ jobs:
           fi
 
           # 基于 origin/main 建临时分支，只取 patch 产物（不带走 src/ 改动）
+          # gen-patch.sh 就地改写了 patches 文件（未提交），丢弃避免切换分支被挡
+          git checkout -- . 2>/dev/null || true
+          git clean -fd 2>/dev/null || true
           BRANCH="fnos-patch-$(date +%Y%m%d-%H%M%S)"
           git checkout -b "$BRANCH" origin/main
           git checkout patcher -- "$PATCH_DIR" fnos-pack/gen-patch.sh
