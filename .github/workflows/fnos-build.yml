@@ -71,15 +71,10 @@ jobs:
       - name: Setup aarch64 musl toolchain
         if: matrix.arch == 'aarch64'
         run: |
-          # aarch64-linux-musl-cross 交叉工具链（musl.cc，预编译 gcc，ring 完全兼容）
-          # GitHub release 在 runner 上会超时，用重试 + 更长超时兜底
-          for i in 1 2 3; do
-            curl --retry 3 --retry-delay 5 --connect-timeout 30 -fsSL \
-              -o /tmp/aarch64-musl.tgz https://musl.cc/aarch64-linux-musl-cross.tgz \
-              && [ -s /tmp/aarch64-musl.tgz ] && break
-            echo "下载失败，重试 $i/3…"
-            sleep 5
-          done
+          # aarch64-linux-musl-cross 交叉工具链（musl.cc GitHub 镜像：runner 可访问；
+          # musl.cc 官网在 runner 上 443 超时）
+          curl -fsSL --retry 3 --retry-delay 5 -o /tmp/aarch64-musl.tgz \
+            https://github.com/musl-cc/musl.cc/releases/latest/download/aarch64-linux-musl-cross.tgz
           tar xzf /tmp/aarch64-musl.tgz -C /tmp
           /tmp/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc --version | head -1
           echo "/tmp/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
