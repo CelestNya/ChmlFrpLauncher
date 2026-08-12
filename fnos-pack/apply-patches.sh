@@ -84,7 +84,7 @@ echo "[fnos-pack] 构建前端…"
 )
 
 echo "[fnos-pack] 注入 shim…"
-node "$REPO_ROOT/fnos-shim/build-shim.ts" --dist "$TMP_WORK/dist"
+node "$REPO_ROOT/fnos-shim/build-shim.mjs" --dist "$TMP_WORK/dist"
 
 # 产物复制到输出目录
 rm -rf "$OUTPUT_DIR"

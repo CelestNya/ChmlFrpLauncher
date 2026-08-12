@@ -27,7 +27,7 @@ const shimSrc = path.join(ROOT, "fnos-shim", "tauri-shim.ts");
 const MARKER = "<!-- fnos-shim -->";
 
 /** 在 pnpm store 中定位 esbuild 包的 CLI 脚本（无 bin link 时可用）。 */
-function findEsbuildCli(): string {
+function findEsbuildCli() {
   const pnpmDir = path.join(ROOT, "node_modules", ".pnpm");
   try {
     const candidates = fs
@@ -54,7 +54,7 @@ function findEsbuildCli(): string {
 
 const ESBUILD_CLI = findEsbuildCli();
 
-function compileShim(): string {
+function compileShim() {
   // 无 import/export 的 IIFE 文件，--format=esm 原样输出（仅做 TS→JS + minify）
   return execFileSync(
     process.execPath,
@@ -69,7 +69,7 @@ function compileShim(): string {
   ).trim();
 }
 
-function injectShim(html: string, shimJs: string): string {
+function injectShim(html, shimJs) {
   if (html.includes(MARKER)) return html;
   const tag = `${MARKER}\n<script>${shimJs}\n</script>`;
   const bodyEnd = "</body>";
