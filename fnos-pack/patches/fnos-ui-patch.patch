@@ -1,3 +1,5 @@
+diff --git a/src/App.tsx b/src/App.tsx
+index 3e48667..1a92d6c 100644
 --- a/src/App.tsx
 +++ b/src/App.tsx
 @@ -1,19 +1,16 @@
@@ -20,7 +22,7 @@
  import { useBackground } from "@/components/App/hooks/useBackground";
  import { useDeepLink } from "@/components/App/hooks/useDeepLink";
  import { useFrpcDownload } from "@/components/App/hooks/useFrpcDownload";
-@@ -40,9 +37,6 @@
+@@ -40,9 +37,6 @@ function App() {
    const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => initialSidebarMode);
    const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => initialSidebarMode !== "classic");
  
@@ -30,7 +32,7 @@
    // 其他功能 Hooks
    useAppTheme();
    useAppInitialization();
-@@ -50,15 +44,12 @@
+@@ -50,15 +44,12 @@ function App() {
    useDeepLink(user, setUser);
    useTunnelNotifications(activeTab);
    const { showCloseConfirmDialog, setShowCloseConfirmDialog } = useWindowEvents();
@@ -50,7 +52,7 @@
    const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
  
    // 主题与更新监听
-@@ -146,20 +137,13 @@
+@@ -146,20 +137,13 @@ function App() {
                onVideoLoadedData={handleVideoLoadedData}
            />
  
@@ -72,7 +74,7 @@
                        bottom: "12px",
                      }}
                  >
-@@ -180,7 +164,7 @@
+@@ -180,7 +164,7 @@ function App() {
                      style={{
                        left: `${SIDEBAR_LEFT + SIDEBAR_COLLAPSED_WIDTH}px`,
                        right: "0",
@@ -81,7 +83,7 @@
                        bottom: "0",
                      }}
                  >
-@@ -200,8 +184,7 @@
+@@ -200,8 +184,7 @@ function App() {
                      userInfo={userInfo}
                  />
                  <div className="flex-1 flex flex-col overflow-hidden relative">
@@ -91,7 +93,7 @@
                      <div className="max-w-6xl mx-auto w-full h-full flex flex-col">{content}</div>
                    </div>
                  </div>
-@@ -209,7 +192,6 @@
+@@ -209,7 +192,6 @@ function App() {
            )}
          </div>
  
@@ -99,85 +101,11 @@
          <CloseConfirmDialog
              isOpen={showCloseConfirmDialog}
              onClose={() => setShowCloseConfirmDialog(false)}
---- a/src/components/pages/Settings/index.tsx
-+++ b/src/components/pages/Settings/index.tsx
-@@ -1,10 +1,8 @@
- import { useState, useEffect, useCallback } from "react";
- import { useTheme } from "./hooks/useTheme";
- import { useBackgroundImage } from "./hooks/useBackgroundImage";
--import { useAutostart } from "./hooks/useAutostart";
- import { useUpdate } from "./hooks/useUpdate";
- import { useFrpcDownload } from "./hooks/useFrpcDownload";
--import { useCloseBehavior } from "./hooks/useCloseBehavior";
- import { useProcessGuard } from "./hooks/useProcessGuard";
- import { useProxy } from "./hooks/useProxy";
- import {
-@@ -30,13 +28,6 @@
- import { toast } from "sonner";
- 
- export function Settings() {
--  const isMacOS =
--    typeof navigator !== "undefined" &&
--    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
--  const isWindows =
--    typeof navigator !== "undefined" &&
--    navigator.platform.toUpperCase().indexOf("WIN") >= 0;
--
-   const {
-     followSystem,
-     setFollowSystem,
-@@ -59,9 +50,6 @@
-     handleClearBackgroundImage,
-   } = useBackgroundImage();
- 
--  const { autostartEnabled, autostartLoading, handleToggleAutostart } =
--    useAutostart();
--
-   const {
-     autoCheckUpdate,
-     checkingUpdate,
-@@ -77,8 +65,6 @@
- 
-   const { isDownloading, handleRedownloadFrpc } = useFrpcDownload();
- 
--  const { closeToTrayEnabled, handleToggleCloseToTray } = useCloseBehavior();
--
-   const { guardEnabled, guardLoading, handleToggleGuard } = useProcessGuard();
- 
-   const { proxyConfig, updateProxyConfig } = useProxy();
-@@ -208,15 +194,11 @@
- 
-       <div className="flex-1 overflow-auto space-y-6">
-         <AppearanceSection
--          isMacOS={isMacOS}
--          isWindows={isWindows}
-           followSystem={followSystem}
-           setFollowSystem={setFollowSystem}
-           theme={theme}
-           setTheme={setTheme}
-           isViewTransitionRef={isViewTransitionRef}
--          showTitleBar={showTitleBar}
--          setShowTitleBar={setShowTitleBar}
-           backgroundImage={backgroundImage}
-           isSelectingImage={isSelectingImage}
-           overlayOpacity={overlayOpacity}
-@@ -248,13 +230,8 @@
-         />
- 
-         <SystemSection
--          autostartEnabled={autostartEnabled}
--          autostartLoading={autostartLoading}
--          onToggleAutostart={handleToggleAutostart}
-           autoCheckUpdate={autoCheckUpdate}
-           onToggleAutoCheckUpdate={handleToggleAutoCheckUpdate}
--          closeToTrayEnabled={closeToTrayEnabled}
--          onToggleCloseToTray={handleToggleCloseToTray}
-           frpcLogLevel={frpcLogLevel}
-           onChangeFrpcLogLevel={setFrpcLogLevel}
-           guardEnabled={guardEnabled}
+diff --git a/src/components/pages/Settings/components/AppearanceSection.tsx b/src/components/pages/Settings/components/AppearanceSection.tsx
+index 69b973d..b85c6af 100644
 --- a/src/components/pages/Settings/components/AppearanceSection.tsx
 +++ b/src/components/pages/Settings/components/AppearanceSection.tsx
-@@ -16,15 +16,11 @@
+@@ -16,15 +16,11 @@ import { getBackgroundType } from "../utils";
  import React, { type RefObject } from "react";
  
  interface AppearanceSectionProps {
@@ -193,7 +121,7 @@
    backgroundImage: string | null;
    isSelectingImage: boolean;
    overlayOpacity: number;
-@@ -48,15 +44,11 @@
+@@ -48,15 +44,11 @@ interface AppearanceSectionProps {
    setIntervalTime: (time: number) => void;
  }
  
@@ -210,7 +138,7 @@
                                      backgroundImage,
                                      isSelectingImage,
                                      overlayOpacity,
-@@ -223,40 +215,6 @@
+@@ -223,40 +215,6 @@ export function AppearanceSection({isMacOS,
              </ItemActions>
            </Item>
  
@@ -251,9 +179,11 @@
            <ItemSeparator />
  
            <Item variant="outline" className="border-0">
+diff --git a/src/components/pages/Settings/components/SystemSection.tsx b/src/components/pages/Settings/components/SystemSection.tsx
+index ca14adb..e319e30 100644
 --- a/src/components/pages/Settings/components/SystemSection.tsx
 +++ b/src/components/pages/Settings/components/SystemSection.tsx
-@@ -11,13 +11,8 @@
+@@ -11,13 +11,8 @@ import {
  } from "@/components/ui/item";
  
  interface SystemSectionProps {
@@ -267,7 +197,7 @@
    frpcLogLevel: FrpcLogLevel;
    onChangeFrpcLogLevel: (value: FrpcLogLevel) => void;
    guardEnabled: boolean;
-@@ -28,13 +23,8 @@
+@@ -28,13 +23,8 @@ interface SystemSectionProps {
  }
  
  export function SystemSection({
@@ -281,10 +211,12 @@
    frpcLogLevel,
    onChangeFrpcLogLevel,
    guardEnabled,
-@@ -52,36 +42,6 @@
+@@ -50,36 +40,6 @@ export function SystemSection({
+         <span>系统</span>
+       </div>
        <div className="rounded-lg bg-card overflow-hidden">
-         <Item variant="outline" className="border-0">
-           <ItemContent>
+-        <Item variant="outline" className="border-0">
+-          <ItemContent>
 -            <ItemTitle>开机自启</ItemTitle>
 -            <ItemDescription className="text-xs">
 -              系统启动时自动运行应用
@@ -313,20 +245,13 @@
 -
 -        <ItemSeparator />
 -
--        <Item variant="outline" className="border-0">
--          <ItemContent>
+         <Item variant="outline" className="border-0">
+           <ItemContent>
              <ItemTitle>启动时自动检测更新</ItemTitle>
-             <ItemDescription className="text-xs">
-               应用启动时自动检查是否有可用更新
-@@ -104,35 +64,6 @@
-                 }`}
-               />
-             </button>
--          </ItemActions>
--        </Item>
--
--        <ItemSeparator />
--
+@@ -109,35 +69,6 @@ export function SystemSection({
+ 
+         <ItemSeparator />
+ 
 -        <Item variant="outline" className="border-0">
 -          <ItemContent>
 -            <ItemTitle>关闭窗口时最小化到托盘</ItemTitle>
@@ -351,6 +276,89 @@
 -                }`}
 -              />
 -            </button>
-           </ItemActions>
-         </Item>
+-          </ItemActions>
+-        </Item>
+-
+-        <ItemSeparator />
+-
+         <Item variant="outline" className="border-0">
+           <ItemContent>
+             <ItemTitle>进程守护</ItemTitle>
+diff --git a/src/components/pages/Settings/index.tsx b/src/components/pages/Settings/index.tsx
+index 820c705..fe2d343 100644
+--- a/src/components/pages/Settings/index.tsx
++++ b/src/components/pages/Settings/index.tsx
+@@ -1,10 +1,8 @@
+ import { useState, useEffect, useCallback } from "react";
+ import { useTheme } from "./hooks/useTheme";
+ import { useBackgroundImage } from "./hooks/useBackgroundImage";
+-import { useAutostart } from "./hooks/useAutostart";
+ import { useUpdate } from "./hooks/useUpdate";
+ import { useFrpcDownload } from "./hooks/useFrpcDownload";
+-import { useCloseBehavior } from "./hooks/useCloseBehavior";
+ import { useProcessGuard } from "./hooks/useProcessGuard";
+ import { useProxy } from "./hooks/useProxy";
+ import {
+@@ -30,13 +28,6 @@ import { updateService } from "@/services/updateService";
+ import { toast } from "sonner";
  
+ export function Settings() {
+-  const isMacOS =
+-    typeof navigator !== "undefined" &&
+-    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+-  const isWindows =
+-    typeof navigator !== "undefined" &&
+-    navigator.platform.toUpperCase().indexOf("WIN") >= 0;
+-
+   const {
+     followSystem,
+     setFollowSystem,
+@@ -59,9 +50,6 @@ export function Settings() {
+     handleClearBackgroundImage,
+   } = useBackgroundImage();
+ 
+-  const { autostartEnabled, autostartLoading, handleToggleAutostart } =
+-    useAutostart();
+-
+   const {
+     autoCheckUpdate,
+     checkingUpdate,
+@@ -77,8 +65,6 @@ export function Settings() {
+ 
+   const { isDownloading, handleRedownloadFrpc } = useFrpcDownload();
+ 
+-  const { closeToTrayEnabled, handleToggleCloseToTray } = useCloseBehavior();
+-
+   const { guardEnabled, guardLoading, handleToggleGuard } = useProcessGuard();
+ 
+   const { proxyConfig, updateProxyConfig } = useProxy();
+@@ -208,15 +194,11 @@ export function Settings() {
+ 
+       <div className="flex-1 overflow-auto space-y-6">
+         <AppearanceSection
+-          isMacOS={isMacOS}
+-          isWindows={isWindows}
+           followSystem={followSystem}
+           setFollowSystem={setFollowSystem}
+           theme={theme}
+           setTheme={setTheme}
+           isViewTransitionRef={isViewTransitionRef}
+-          showTitleBar={showTitleBar}
+-          setShowTitleBar={setShowTitleBar}
+           backgroundImage={backgroundImage}
+           isSelectingImage={isSelectingImage}
+           overlayOpacity={overlayOpacity}
+@@ -248,13 +230,8 @@ export function Settings() {
+         />
+ 
+         <SystemSection
+-          autostartEnabled={autostartEnabled}
+-          autostartLoading={autostartLoading}
+-          onToggleAutostart={handleToggleAutostart}
+           autoCheckUpdate={autoCheckUpdate}
+           onToggleAutoCheckUpdate={handleToggleAutoCheckUpdate}
+-          closeToTrayEnabled={closeToTrayEnabled}
+-          onToggleCloseToTray={handleToggleCloseToTray}
+           frpcLogLevel={frpcLogLevel}
+           onChangeFrpcLogLevel={setFrpcLogLevel}
+           guardEnabled={guardEnabled}

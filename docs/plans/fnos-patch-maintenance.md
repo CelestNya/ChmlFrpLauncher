@@ -1,41 +1,61 @@
-# fnOS 前端 patch 机制与维护
+# fnOS 前端双分支 patch 机制与维护
 
-> 形态 C（零改动补丁）的实践：主仓 `src/` 工作树保持零改动，
-> 所有 fnOS 前端适配抽离为 patch，构建时在临时副本上应用。
+> 形态 C（零改动补丁）的实践：**main 分支 src/ 保持零改动**，fnOS 前端适配
+> 全部以 patch 形式存在；开发在 **patcher 分支**（侵入式），patch 由 CI 自动生成。
 
-## 结构
+## 双分支模型
+
+```
+main ──── 纯净上游 + patch 文件 + 构建链（apply-patches.sh / build-fpk.sh / gen-patch.sh / CI）
+              ↑ PR（仅 patches/ 目录，CI 自动开）
+patcher ── main + src/ 上的侵入式 fnOS 改动（开发态）
+```
+
+| 分支 | src/ 状态 | 用途 |
+|---|---|---|
+| `main` | 零改动（0 侵入） | 发布态：CI 构建 .fpk 时在临时副本应用 patch |
+| `patcher` | 含全部 fnOS 改动（9 文件） | 开发态：改 fnOS 前端功能直接改这里 |
+
+## Patch 结构
 
 ```
 fnos-pack/patches/
-├── fnos-ui-patch.patch        # UI 裁剪：删 TitleBar/杀软弹窗/自启/托盘设置（4 文件）
-└── fnos-feature-patch.patch   # fnOS 功能：壁纸 dataURL/文件夹轮播、日志去重+清空联动、
-                               # replay 通知跳过、音效网关前缀（5 文件）
+├── fnos-ui-patch.patch        # UI 裁剪：删 TitleBar/杀软弹窗/自启/托盘（4 文件）
+└── fnos-feature-patch.patch   # fnOS 功能：壁纸/日志/通知/音效（5 文件）
 ```
 
-| patch | 覆盖文件 | 内容 |
-|---|---|---|
-| ui-patch | `src/App.tsx`、`src/components/pages/Settings/index.tsx`、`.../AppearanceSection.tsx`、`.../SystemSection.tsx` | 删除 fnOS 不适用的 UI（标题栏、杀软弹窗、开机自启、托盘） |
-| feature-patch | `src/components/pages/Settings/hooks/useBackgroundImage.ts`、`src/services/logStore.ts`、`src/lib/sound.ts`、`src/services/frpcManager.ts`、`src/components/App/hooks/useTunnelNotifications.ts` | fnOS 专属功能分支（`__FNOS__` 环境判断、replay 标记、dataURL 壁纸等） |
+两个 patch 都是**全量**（从干净上游可应用），由 `gen-patch.sh` 从 patcher 分支
+相对上游 main 的差异生成，幂等覆盖。
 
-应用顺序：ui-patch 先，feature-patch 后。格式均为 git 双树（`a/`/`b/` 前缀），`patch -p1` 应用。
+## 日常开发流程（改 fnOS 前端功能）
 
-## 维护流程
+1. 切到 `patcher` 分支，直接在 `src/` 改 + commit
+2. 本地可选：`bash fnos-pack/gen-patch.sh` 预览产物
+3. `git push origin patcher` → CI 自动生成 patch → 开 PR（仅 patches/ 目录）
+4. review PR 后合并到 main
 
-### 新增/修改 fnOS 前端功能
-1. 在 `src/` 直接改（此时是工作树改动）
-2. 改的是 ui-patch 文件 → `git diff HEAD -- <该文件>` 更新 `fnos-ui-patch.patch`
-3. 改的是 feature-patch 文件 → `git diff HEAD -- <该文件>` 更新 `fnos-feature-patch.patch`
-4. **revert 工作树**：`git checkout HEAD -- <改过的文件>`
-5. 验证：`bash fnos-pack/apply-patches.sh`（dry-run 预检 + 构建），确认 dist 产物含新逻辑
+## 上游同步（主仓更新时）
 
-### 上游同步（主仓更新时）
-- 上游改动这 9 个文件 → patch 应用失败 → apply-patches.sh 的 **dry-run 预检**会明确报错
-  （"请更新 fnos-ui-patch.patch / fnos-feature-patch.patch"），不会静默产出残缺产物
-- 修法：合并 patch 到最新上游状态（或用 `git diff <新基线>` 重新生成）
-- 上游新增 tauri 命令 / Tauri API 调用 → 需补 `fnos-daemon/src/invoke.rs` 命令 + `fnos-shim/tauri-shim.ts` 降级
+```
+main:   git pull origin main（或 fetch upstream main 后 merge）
+patcher: git rebase origin/main（冲突在 patcher 人工解决，main 永远干净）
+         → 修改后 push patcher → CI 重新生成 patch
+```
+
+- 上游改动这 9 个文件 → patch 应用失败 → apply-patches.sh 的 **dry-run 预检**明确报错，
+  不会静默产出残缺产物
+- 上游新增 tauri 命令 / Tauri API 调用 → 需补 `fnos-daemon/src/invoke.rs` 命令 +
+  `fnos-shim/tauri-shim.ts` 降级
+
+## CI
+
+- `.github/workflows/fnos-build.yml` — 构建 .fpk（tag v*，临时副本应用 patch）
+- `.github/workflows/fnos-patch-gen.yml` — push patcher 时自动生成 patch + 开 PR
 
 ## 验证
 
 `apply-patches.sh` 内置两段验证（失败即 exit 1）：
 - UI 精简：`src/App.tsx` 不再含 `TitleBar` / `AntivirusWarningDialog`
 - feature：`useBackgroundImage.ts` 含 `__FNOS__`、`useTunnelNotifications.ts` 含 `replay`
+
+`gen-patch.sh` 内置自检：两个 patch 可从基线干净应用。
