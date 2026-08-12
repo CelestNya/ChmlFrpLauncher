@@ -66,14 +66,16 @@ jobs:
           # gen-patch.sh 就地改写了 patches 文件（未提交），丢弃避免切换分支被挡
           git checkout -- . 2>/dev/null || true
           git clean -fd 2>/dev/null || true
-          BRANCH="fnos-patch-$(date +%Y%m%d-%H%M%S)"
+          # 固定分支名 + force push：每次只保留一条分支/一个 PR，避免临时分支积累
+          BRANCH="fnos-patch"
+          git branch -D "$BRANCH" 2>/dev/null || true
           git checkout -b "$BRANCH" origin/main
           git checkout patcher -- "$PATCH_DIR" fnos-pack/gen-patch.sh
           git add "$PATCH_DIR" fnos-pack/gen-patch.sh
           git -c user.name='fnos-bot' -c user.email='fnos-bot@users.noreply.github.com' \
             commit -m "chore(fnos): 自动生成 fnOS patch（来自 patcher 分支）"
 
-          git push origin "$BRANCH"
+          git push origin "$BRANCH" --force
 
           # 若同源 PR 已存在则跳过（幂等）
           EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' || true)
