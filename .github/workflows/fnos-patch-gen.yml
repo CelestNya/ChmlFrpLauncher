@@ -1,0 +1,93 @@
+name: fnOS Patch Generator
+
+# 从 patcher 分支自动生成 fnOS 前端 patch，并开 PR 合入 main。
+#
+# 触发：push 到 patcher 分支（或手动 dispatch）。
+# 流程：
+#   1. checkout patcher（fetch-depth 0 获取全历史）
+#   2. 同步上游最新 main 到 origin/main 引用（作为 patch 生成基线）
+#   3. 跑 fnos-pack/gen-patch.sh 生成两个 patch（diff 上游基线）
+#   4. 基于 origin/main 建临时分支，只提交 patches/ + gen-patch.sh（不含 src/）
+#   5. push 临时分支 → 开 PR：临时分支 → main（人工 review 后合并）
+#
+# 为什么基于 origin/main 建临时分支：
+#   patcher 分支含 src/ 的侵入式改动，若直接 PR 会带出 src/ 改动破坏 0 侵入。
+#   临时分支从 origin/main 检出，只取 patch 产物，PR 仅含 patches/ 目录变化。
+
+on:
+  push:
+    branches:
+      - patcher
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  gen-patch:
+    name: Generate fnOS patches & PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout patcher (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: patcher
+          fetch-depth: 0
+
+      - name: Sync upstream main baseline
+        run: |
+          git remote add upstream https://github.com/TechCat-Team/ChmlFrpLauncher.git
+          git fetch upstream main
+          # 覆盖 origin/main 引用为上游最新（gen-patch.sh 默认用 origin/main 作基线）
+          git update-ref refs/remotes/origin/main refs/remotes/upstream/main
+          echo "上游基线: $(git rev-parse --short origin/main)"
+
+      - name: Generate patches
+        run: |
+          bash fnos-pack/gen-patch.sh
+          echo "=== patch 变更 ==="
+          git status --short fnos-pack/patches/
+
+      - name: Open PR with patches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # patch 无变化则跳过
+          PATCH_DIR=fnos-pack/patches
+          if git diff --quiet origin/main -- "$PATCH_DIR" fnos-pack/gen-patch.sh; then
+            echo "✅ patch 无变化，无需 PR"
+            exit 0
+          fi
+
+          # 基于 origin/main 建临时分支，只取 patch 产物（不带走 src/ 改动）
+          BRANCH="fnos-patch-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH" origin/main
+          git checkout patcher -- "$PATCH_DIR" fnos-pack/gen-patch.sh
+          git add "$PATCH_DIR" fnos-pack/gen-patch.sh
+          git -c user.name='fnos-bot' -c user.email='fnos-bot@users.noreply.github.com' \
+            commit -m "chore(fnos): 自动生成 fnOS patch（来自 patcher 分支）
+
+patch 由 patcher 分支相对上游 main 的差异生成，请 review 后合并。"
+
+          git push origin "$BRANCH"
+
+          # 若同源 PR 已存在则跳过（幂等）
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' || true)
+          if [ -n "$EXISTING" ]; then
+            echo "已存在 PR #$EXISTING，跳过创建"
+            exit 0
+          fi
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(fnos): 更新 fnOS patch（自动生成）" \
+            --body "由 patcher 分支自动生成的 fnOS 前端 patch 更新。
+
+**来源**: \`patcher\` 分支 @ $(git rev-parse --short patcher)
+**基线**: 上游 main @ $(git rev-parse --short origin/main)
+
+仅改动 \`fnos-pack/patches/\`（+ gen-patch.sh），不涉及 src/。请 review 后合并。"
+          echo "✅ 已创建 PR: $(gh pr view --json url -q .url)"
