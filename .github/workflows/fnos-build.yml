@@ -62,6 +62,15 @@ jobs:
             python3-pil \
             gcc-aarch64-linux-gnu
 
+      # aarch64 musl 交叉工具链（apt 无此包，用 musl.cc 预编译工具链）
+      # daemon 必须 musl 静态编译（fnOS glibc 2.36），gnu 交叉编译器不满足
+      - name: Setup aarch64 musl toolchain
+        run: |
+          curl -fsSL -o /tmp/aarch64-musl.tgz https://musl.cc/aarch64-linux-musl-cross.tgz
+          tar xzf /tmp/aarch64-musl.tgz -C /tmp
+          ls /tmp/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc
+          echo "/tmp/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
+
       # 官方 fnpack 打包工具（build-fpk.sh 内部也有自动下载兜底）
       - name: Setup fnpack
         uses: mengzhuo/setup-fnpack@v1
