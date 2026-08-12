@@ -269,22 +269,17 @@ pub fn apply_update(
         return Err(format!("target 目录不存在: {}", target.display()));
     }
 
-    // 1. 备份并替换 daemon 二进制
+    // 1. 备份并替换 daemon 二进制（内部失败自动回滚）
     let daemon_dst = target.join("chmlfrp-daemon");
     backup_and_replace(&staged.join("chmlfrp-daemon"), &daemon_dst)?;
 
-    // 2. 备份并替换 dist/ 整目录
-    let dist_dst = target.join("dist");
-    let dist_bak = target.join("dist.bak");
-    if dist_bak.exists() {
-        let _ = std::fs::remove_dir_all(&dist_bak);
-    }
-    if dist_dst.exists() {
-        std::fs::rename(&dist_dst, &dist_bak).map_err(|e| format!("备份 dist 失败: {e}"))?;
-    }
-    let staged_dist = staged.join("dist");
-    if staged_dist.exists() {
-        std::fs::rename(&staged_dist, &dist_dst).map_err(|e| format!("替换 dist 失败: {e}"))?;
+    // 2. 备份并替换 dist/ 整目录（失败时整体回滚 daemon，避免半更新状态）
+    if let Err(e) = replace_dir_atomic(&staged.join("dist"), &target.join("dist")) {
+        let daemon_bak = daemon_dst.with_extension("bak");
+        if daemon_bak.exists() {
+            let _ = std::fs::rename(&daemon_bak, &daemon_dst);
+        }
+        return Err(e);
     }
 
     // 3. 权限：保持可执行
@@ -303,13 +298,50 @@ pub fn apply_update(
     Ok(())
 }
 
-/// 备份旧文件并原子替换（先写临时文件再 rename，避免半写状态）。
+/// 备份旧文件并原子替换（daemon 中-6 修复）。
+///
+/// 原实现 `copy(src, dst)` 直写目标：中断即留半写二进制，下次启动即死且
+/// 启动脚本不回退 .bak。现改为：旧文件改名 bak → copy 到同目录临时文件 →
+/// rename 原子落位；任一步失败恢复 bak。
 fn backup_and_replace(src: &Path, dst: &Path) -> Result<(), String> {
     let bak = dst.with_extension("bak");
+    let tmp = dst.with_extension("tmp");
     if dst.exists() {
         std::fs::rename(dst, &bak).map_err(|e| format!("备份 {} 失败: {e}", dst.display()))?;
     }
-    std::fs::copy(src, dst).map_err(|e| format!("替换 {} 失败: {e}", dst.display()))?;
+    if let Err(e) = std::fs::copy(src, &tmp) {
+        if bak.exists() {
+            let _ = std::fs::rename(&bak, dst); // 回滚
+        }
+        return Err(format!("替换 {} 失败: {e}", dst.display()));
+    }
+    if let Err(e) = std::fs::rename(&tmp, dst) {
+        if bak.exists() {
+            let _ = std::fs::rename(&bak, dst); // 回滚
+        }
+        return Err(format!("替换 {} 失败: {e}", dst.display()));
+    }
+    Ok(())
+}
+
+/// 整目录原子替换：旧目录改名 bak → staged 目录 rename 落位；失败回滚。
+fn replace_dir_atomic(staged_dir: &Path, dst_dir: &Path) -> Result<(), String> {
+    let bak = dst_dir.with_extension("bak");
+    if bak.exists() {
+        let _ = std::fs::remove_dir_all(&bak);
+    }
+    if dst_dir.exists() {
+        std::fs::rename(dst_dir, &bak)
+            .map_err(|e| format!("备份 {} 失败: {e}", dst_dir.display()))?;
+    }
+    if staged_dir.exists() {
+        if let Err(e) = std::fs::rename(staged_dir, dst_dir) {
+            if bak.exists() {
+                let _ = std::fs::rename(&bak, dst_dir); // 回滚
+            }
+            return Err(format!("替换 {} 失败: {e}", dst_dir.display()));
+        }
+    }
     Ok(())
 }
 
@@ -328,6 +360,17 @@ fn spawn_new_process(cfg: &DaemonConfig, daemon_bin: &Path) -> Result<(), String
     if let Err(e) = std::fs::write(&pid_file, pid.to_string()) {
         warn!("写入 PID 文件失败: {e}");
     }
+
+    // daemon 中-6：探测新进程存活——二进制损坏/启动即崩时不应继续关停旧进程
+    //（否则双 daemon 都没了）。给新进程 300ms 启动窗口后再探测。
+    #[cfg(unix)]
+    {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if unsafe { libc::kill(pid as i32, 0) } != 0 {
+            return Err(format!("新 daemon (PID {pid}) 启动后立即退出，已取消重启"));
+        }
+    }
+
     info!("新 daemon 已启动 (PID {pid})");
     Ok(())
 }
@@ -362,6 +405,15 @@ fn verify_bundle(staged: &Path) -> Result<(), String> {
             manifest.version,
             env!("CARGO_PKG_VERSION")
         ));
+    }
+
+    // 布局校验（daemon 中-6）：必须含 daemon 二进制与 dist/ 前端目录，
+    // 否则 apply 会把线上 dist 改名 .bak 后无替换，形成半更新
+    if !manifest.files.contains_key("chmlfrp-daemon") {
+        return Err("更新包缺少 chmlfrp-daemon 二进制".to_string());
+    }
+    if !manifest.files.keys().any(|k| k.starts_with("dist/")) {
+        return Err("更新包缺少 dist/ 前端目录内容".to_string());
     }
 
     // 收集 staged 下全部文件（相对路径）
@@ -414,4 +466,119 @@ fn sha256_hex(path: &Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
     let data = std::fs::read(path).map_err(|e| format!("读取文件失败: {e}"))?;
     Ok(hex::encode(Sha256::digest(&data)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "fnos-update-{}-{}",
+            name,
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn 版本比较边界() {
+        assert!(version_compare("0.7.4", "0.7.5"));
+        assert!(version_compare("0.7.5", "0.8.0"));
+        assert!(version_compare("v0.7.5", "0.8.0"));
+        assert!(version_compare("1.0", "1.0.0"), "前缀相等时更短者视为旧版本");
+        assert!(!version_compare("0.7.5", "0.7.5"));
+        assert!(!version_compare("0.8.0", "0.7.5"));
+        assert!(!version_compare("1.0.0", "1.0"));
+    }
+
+    #[test]
+    fn 原子替换_成功与失败回滚() {
+        // daemon 中-6：copy 直写目标 → 中断即半写二进制；改临时文件 + rename
+        let dir = temp_dir("replace");
+        let src = dir.join("src");
+        let dst = dir.join("dst");
+        std::fs::write(&src, "NEW").unwrap();
+        std::fs::write(&dst, "OLD").unwrap();
+        backup_and_replace(&src, &dst).unwrap();
+        assert_eq!(std::fs::read_to_string(&dst).unwrap(), "NEW");
+        assert!(dst.with_extension("bak").exists(), "旧文件应保留为 bak");
+
+        // copy 失败（src 不存在）→ 回滚，dst 保持原内容
+        let src2 = dir.join("missing");
+        let dst2 = dir.join("dst2");
+        std::fs::write(&dst2, "KEEP").unwrap();
+        assert!(backup_and_replace(&src2, &dst2).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&dst2).unwrap(),
+            "KEEP",
+            "失败后应回滚原文件"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 目录原子替换() {
+        let dir = temp_dir("dir-replace");
+        let staged = dir.join("staged-dist");
+        let dst = dir.join("dist");
+        std::fs::create_dir_all(staged.join("assets")).unwrap();
+        std::fs::write(staged.join("assets/a.js"), "new-js").unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(dst.join("old.js"), "old-js").unwrap();
+
+        replace_dir_atomic(&staged, &dst).unwrap();
+        assert!(dst.join("assets/a.js").exists(), "新 dist 未落位");
+        assert!(!dst.join("old.js").exists(), "旧文件应被替换");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bundle布局校验_缺关键内容拒绝() {
+        let dir = temp_dir("verify");
+        let daemon = dir.join("chmlfrp-daemon");
+        let dist_file = dir.join("dist/index.html");
+        std::fs::create_dir_all(dir.join("dist")).unwrap();
+        std::fs::write(&daemon, "bin").unwrap();
+        std::fs::write(&dist_file, "html").unwrap();
+        let full_manifest = serde_json::json!({
+            "version": "9.9.9",
+            "platform": platform_suffix(),
+            "files": {
+                "chmlfrp-daemon": sha256_hex(&daemon).unwrap(),
+                "dist/index.html": sha256_hex(&dist_file).unwrap(),
+            }
+        });
+        std::fs::write(dir.join("manifest.json"), full_manifest.to_string()).unwrap();
+        // 完整 → 通过（版本 9.9.9 > 当前）
+        assert!(verify_bundle(&dir).is_ok());
+
+        // 缺 daemon 条目 → 拒绝
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::json!({
+                "version": "9.9.9",
+                "platform": platform_suffix(),
+                "files": { "dist/index.html": sha256_hex(&dist_file).unwrap() }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(verify_bundle(&dir).is_err(), "缺 chmlfrp-daemon 应拒绝");
+
+        // 缺 dist/ 条目 → 拒绝（daemon 中-6：否则 apply 把线上 dist 改成 .bak 后无替换）
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::json!({
+                "version": "9.9.9",
+                "platform": platform_suffix(),
+                "files": { "chmlfrp-daemon": sha256_hex(&daemon).unwrap() }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(verify_bundle(&dir).is_err(), "缺 dist/ 应拒绝");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

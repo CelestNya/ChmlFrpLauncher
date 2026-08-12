@@ -27,19 +27,36 @@ pub enum AuthMode {
 }
 
 pub fn load_mode() -> AuthMode {
-    if std::env::var("DAEMON_TOKEN")
+    let token_set = std::env::var("DAEMON_TOKEN")
         .map(|v| !v.trim().is_empty())
-        .unwrap_or(false)
-    {
-        return AuthMode::Token;
-    }
-    if std::env::var("TRIM_GATEWAY")
+        .unwrap_or(false);
+    let gateway_set = std::env::var("TRIM_GATEWAY")
         .map(|v| v == "1" || v == "true")
-        .unwrap_or(false)
-    {
-        return AuthMode::Gateway;
+        .unwrap_or(false);
+    load_mode_from(token_set, gateway_set)
+}
+
+/// 纯函数：从环境标志推导鉴权模式（便于测试，不读环境变量）。
+fn load_mode_from(token_set: bool, gateway_set: bool) -> AuthMode {
+    if token_set {
+        AuthMode::Token
+    } else if gateway_set {
+        AuthMode::Gateway
+    } else {
+        AuthMode::None
     }
-    AuthMode::None
+}
+
+/// 恒定时间字符串比较（防时序侧信道；长度不同时按最长遍历补齐）。
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
+    let (x, y) = (a.as_bytes(), b.as_bytes());
+    let mut diff = (x.len() != y.len()) as u8;
+    for i in 0..x.len().max(y.len()) {
+        let xb = x.get(i).copied().unwrap_or(0);
+        let yb = y.get(i).copied().unwrap_or(0);
+        diff |= xb ^ yb;
+    }
+    diff == 0
 }
 
 /// 鉴权中间件：Token 模式校验请求头，Gateway 模式校验用户 Header，
@@ -55,7 +72,7 @@ pub async fn require_auth(req: Request, next: Next) -> Result<Response, StatusCo
                 .get(TOKEN_HEADER)
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or_default();
-            if provided == expected && !expected.is_empty() {
+            if !expected.is_empty() && constant_time_eq(provided, &expected) {
                 Ok(next.run(req).await)
             } else {
                 Err(StatusCode::UNAUTHORIZED)
@@ -74,5 +91,27 @@ pub async fn require_auth(req: Request, next: Next) -> Result<Response, StatusCo
                 Err(StatusCode::UNAUTHORIZED)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 模式优先级_token优先于gateway() {
+        assert_eq!(load_mode_from(true, true), AuthMode::Token);
+        assert_eq!(load_mode_from(true, false), AuthMode::Token);
+        assert_eq!(load_mode_from(false, true), AuthMode::Gateway);
+        assert_eq!(load_mode_from(false, false), AuthMode::None);
+    }
+
+    #[test]
+    fn 恒时比较_等值与不等值() {
+        assert!(constant_time_eq("abc123", "abc123"));
+        assert!(!constant_time_eq("abc123", "abc124"));
+        assert!(!constant_time_eq("abc123", "abc1234")); // 长度不同
+        assert!(!constant_time_eq("abc123", "")); // 空 expected 不匹配任何非空
+        assert!(constant_time_eq("", "")); // 双方皆空（上层会用 !expected.is_empty() 拦截放行）
     }
 }

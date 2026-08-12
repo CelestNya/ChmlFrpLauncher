@@ -5,7 +5,7 @@
 //! 进程表 key 为隧道 id 的哈希（string_to_i32，算法必须与桌面版一致）。
 
 use crate::events::LogMessage;
-use crate::frpc::{self, FrpcManager};
+use crate::frpc::{self, FrpcManager, ProcessEntry};
 use crate::guard;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
@@ -13,6 +13,7 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::Arc;
+use std::time::Duration;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -227,18 +228,23 @@ impl CustomManager {
     pub fn delete_custom_tunnel(&self, tunnel_id: String) -> Result<(), String> {
         let tunnel_id_hash = self.tunnel_hash(&tunnel_id);
 
-        {
+        // 移除守护登记（daemon 中-12：原实现删除后守护仍会在 3s tick 尝试重启）
+        guard::remove_guarded_process(&self.frpc.guard, tunnel_id_hash, true);
+
+        // 锁外 kill + 带超时回收（daemon 中-5，同步上下文内 bounded wait）
+        let removed = {
             let mut procs = self
                 .frpc
                 .processes
                 .lock()
                 .map_err(|e| format!("获取进程锁失败: {}", e))?;
-            if let Some(mut child) = procs.remove(&tunnel_id_hash) {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-            let _ = self.frpc.persistence.remove_running_tunnel(tunnel_id_hash);
+            procs.remove(&tunnel_id_hash)
+        };
+        if let Some(ProcessEntry::Running(mut child)) = removed {
+            let _ = child.kill();
+            let _ = frpc::wait_child_timeout(&mut child, Duration::from_secs(5));
         }
+        let _ = self.frpc.persistence.remove_running_tunnel(tunnel_id_hash);
 
         let app_dir = self.app_dir();
         let config_file = app_dir.join(self.config_file_name(&tunnel_id));
@@ -266,39 +272,55 @@ impl CustomManager {
     pub async fn start_custom_tunnel(&self, tunnel_id: String) -> Result<String, String> {
         let tunnel_id_hash = self.tunnel_hash(&tunnel_id);
 
+        // 原子检查 + 占位（daemon 高-3，与 start_frpc 同构）
         {
-            let procs = self
+            let mut procs = self
                 .frpc
                 .processes
                 .lock()
                 .map_err(|e| format!("获取进程锁失败: {}", e))?;
             if procs.contains_key(&tunnel_id_hash) {
-                return Err("该隧道已在运行中".to_string());
+                return Err("该隧道已在运行中或正在启动".to_string());
             }
+            procs.insert(tunnel_id_hash, ProcessEntry::Starting);
         }
 
-        let app_dir = self.app_dir();
-        let frpc_path = self.frpc.resolve_frpc_path()?;
+        let spawn_result: Result<(std::process::Child, u32), String> = (|| {
+            let app_dir = self.app_dir();
+            let frpc_path = self.frpc.resolve_frpc_path()?;
 
-        let config_path = app_dir.join(self.config_file_name(&tunnel_id));
-        if !config_path.exists() {
-            return Err("配置文件不存在".to_string());
-        }
+            let config_path = app_dir.join(self.config_file_name(&tunnel_id));
+            if !config_path.exists() {
+                return Err("配置文件不存在".to_string());
+            }
 
-        let mut cmd = StdCommand::new(&frpc_path);
-        cmd.current_dir(&app_dir)
-            .arg("-c")
-            .arg(&config_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            let mut cmd = StdCommand::new(&frpc_path);
+            cmd.current_dir(&app_dir)
+                .arg("-c")
+                .arg(&config_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
 
-        #[cfg(target_os = "windows")]
-        {
-            cmd.creation_flags(0x08000000);
-        }
+            #[cfg(target_os = "windows")]
+            {
+                cmd.creation_flags(0x08000000);
+            }
 
-        let mut child = cmd.spawn().map_err(|e| format!("启动 frpc 失败: {}", e))?;
-        let pid = child.id();
+            let child = cmd.spawn().map_err(|e| format!("启动 frpc 失败: {}", e))?;
+            let pid = child.id();
+            Ok((child, pid))
+        })();
+
+        let (mut child, pid) = match spawn_result {
+            Ok(v) => v,
+            Err(e) => {
+                // 回滚占位
+                if let Ok(mut procs) = self.frpc.processes.lock() {
+                    procs.remove(&tunnel_id_hash);
+                }
+                return Err(e);
+            }
+        };
 
         let timestamp = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
         self.frpc.emit_log(LogMessage {
@@ -333,13 +355,25 @@ impl CustomManager {
             );
         }
 
-        {
+        // 占位 → Running；若占位已被并发 stop 移除，取回 child 并杀掉（尊重用户停止）
+        let orphan = {
             let mut procs = self
                 .frpc
                 .processes
                 .lock()
                 .map_err(|e| format!("获取进程锁失败: {}", e))?;
-            procs.insert(tunnel_id_hash, child);
+            match procs.get_mut(&tunnel_id_hash) {
+                Some(entry) if matches!(entry, ProcessEntry::Starting) => {
+                    *entry = ProcessEntry::Running(child);
+                    None
+                }
+                _ => Some(child),
+            }
+        };
+        if let Some(mut orphan) = orphan {
+            let _ = orphan.kill();
+            let _ = frpc::wait_child_timeout(&mut orphan, Duration::from_secs(5));
+            return Ok("自定义隧道已停止".to_string());
         }
 
         let _ = self.frpc.persistence.save_running_tunnel(
@@ -347,6 +381,7 @@ impl CustomManager {
             pid,
             "custom",
             Some(tunnel_id.clone()),
+            None,
         );
 
         // 加入守护集合
@@ -360,44 +395,45 @@ impl CustomManager {
 
         guard::remove_guarded_process(&self.frpc.guard, tunnel_id_hash, true);
 
-        let found_in_manager = {
+        // 锁外 kill + 带超时回收（daemon 中-5，与 stop_frpc 同构）
+        let removed = {
             let mut procs = self
                 .frpc
                 .processes
                 .lock()
                 .map_err(|e| format!("获取进程锁失败: {}", e))?;
-
-            if let Some(mut child) = procs.remove(&tunnel_id_hash) {
-                let result = match child.kill() {
-                    Ok(_) => {
-                        let _ = child.wait();
-                        Ok("自定义隧道已停止".to_string())
-                    }
-                    Err(e) => {
-                        let _ = child.wait();
-                        Err(format!("停止进程失败: {}", e))
-                    }
-                };
-                let _ = self.frpc.persistence.remove_running_tunnel(tunnel_id_hash);
-                return result;
-            }
-            false
+            procs.remove(&tunnel_id_hash)
         };
 
-        if !found_in_manager {
-            if let Some(info) = self
+        if let Some(entry) = removed {
+            if let ProcessEntry::Running(mut child) = entry {
+                child
+                    .kill()
+                    .map_err(|e| format!("停止进程失败: {}", e))?;
+                let _ = tokio::task::spawn_blocking(move || {
+                    frpc::wait_child_timeout(&mut child, Duration::from_secs(5))
+                })
+                .await
+                .unwrap_or(false);
+            }
+            let _ = self
                 .frpc
                 .persistence
-                .get_all_records()
-                .into_iter()
-                .find(|t| t.tunnel_id == tunnel_id_hash)
-            {
-                let _ = self.frpc.persistence.kill_orphan(tunnel_id_hash, info.pid);
-            }
-            Ok("自定义隧道已停止".to_string())
-        } else {
-            Ok("自定义隧道已停止".to_string())
+                .remove_running_tunnel(tunnel_id_hash);
+            return Ok("自定义隧道已停止".to_string());
         }
+
+        // 不在进程管理器：孤儿回收（持久化 PID 兜底）
+        if let Some(info) = self
+            .frpc
+            .persistence
+            .get_all_records()
+            .into_iter()
+            .find(|t| t.tunnel_id == tunnel_id_hash)
+        {
+            let _ = self.frpc.persistence.kill_orphan(tunnel_id_hash, info.pid);
+        }
+        Ok("自定义隧道已停止".to_string())
     }
 
     pub fn is_custom_tunnel_running(&self, tunnel_id: String) -> Result<bool, String> {
@@ -410,19 +446,28 @@ impl CustomManager {
                 .lock()
                 .map_err(|e| format!("获取进程锁失败: {}", e))?;
 
-            if let Some(child) = procs.get_mut(&tunnel_id_hash) {
-                match child.try_wait() {
-                    Ok(Some(_)) => {
-                        procs.remove(&tunnel_id_hash);
-                        let _ = self.frpc.persistence.remove_running_tunnel(tunnel_id_hash);
-                        Some(false)
-                    }
-                    Ok(None) => Some(true),
-                    Err(_) => {
-                        procs.remove(&tunnel_id_hash);
-                        let _ = self.frpc.persistence.remove_running_tunnel(tunnel_id_hash);
-                        Some(false)
-                    }
+            if let Some(entry) = procs.get_mut(&tunnel_id_hash) {
+                match entry {
+                    ProcessEntry::Starting => Some(true),
+                    ProcessEntry::Running(child) => match child.try_wait() {
+                        Ok(Some(_)) => {
+                            procs.remove(&tunnel_id_hash);
+                            let _ = self
+                                .frpc
+                                .persistence
+                                .remove_running_tunnel(tunnel_id_hash);
+                            Some(false)
+                        }
+                        Ok(None) => Some(true),
+                        Err(_) => {
+                            procs.remove(&tunnel_id_hash);
+                            let _ = self
+                                .frpc
+                                .persistence
+                                .remove_running_tunnel(tunnel_id_hash);
+                            Some(false)
+                        }
+                    },
                 }
             } else {
                 None

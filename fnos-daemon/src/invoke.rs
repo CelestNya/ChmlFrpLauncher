@@ -171,7 +171,13 @@ async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Va
                 enabled: bool,
             }
             let args: GuardArgs = parse_args(args)?;
-            let data = guard::set_process_guard_enabled(&state.guard, args.enabled);
+            // daemon 中-12：启用时把存量运行隧道重新登记守护
+            let running = state.frpc.persistence.get_running_tunnels();
+            let data = guard::set_process_guard_enabled_with_recovery(
+                &state.guard,
+                args.enabled,
+                &running,
+            );
             Ok(json!(data))
         }
         "get_process_guard_enabled" => {
@@ -400,7 +406,7 @@ async fn check_log_with_emit(
     tunnel_id: i32,
     log_message: String,
 ) -> Result<String, String> {
-    use crate::events::{Event, LogMessage};
+    use crate::events::LogMessage;
 
     let Some(pattern) = guard::should_stop_guard_by_log(&log_message) else {
         return Ok("无需停止守护".to_string());
@@ -409,14 +415,16 @@ async fn check_log_with_emit(
     guard::remove_guarded_process(&state.guard, tunnel_id, false);
 
     let timestamp = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
-    let _ = state.events.send(Event::log(LogMessage {
+    // daemon 中-12：走 emit_log（进补发缓冲）而非裸 events.send——WS 断线窗口内
+    // 该消息会丢失且重连后不补发
+    state.frpc.emit_log(LogMessage {
         tunnel_id,
         message: format!(
             "[W] [ChmlFrpLauncher] 检测到错误 \"{}\"，已停止守护进程",
             pattern
         ),
         timestamp,
-    }));
+    });
 
     Ok("已停止守护进程".to_string())
 }

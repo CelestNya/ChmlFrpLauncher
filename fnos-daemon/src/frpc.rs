@@ -7,7 +7,7 @@
 use crate::events::{push_log_history, Event, LogHistory, LogMessage};
 use crate::guard::{self, GuardState};
 use crate::persist::Persistence;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::{BufRead, BufReader};
@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command as StdCommand, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 #[cfg(target_os = "windows")]
@@ -25,7 +26,7 @@ use std::os::windows::process::CommandExt;
 /// ⚠️ 字段保持 snake_case：Tauri 2 只对 invoke **顶层参数键**做 camelCase→snake_case
 /// 转换，嵌套结构体按 Rust 字段名原样反序列化——前端 frpcManager 构造的 config
 /// 就是 snake_case（tunnel_id / server_addr / ...），daemon 必须用默认字段名匹配。
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct TunnelConfig {
     pub tunnel_id: i32,
     pub tunnel_name: String,
@@ -44,10 +45,41 @@ pub struct TunnelConfig {
     pub kcp_optimization: bool,
 }
 
+/// 进程表条目状态（daemon 高-3 修复）。
+///
+/// `Starting`：并发 start 的原子占位——防止两个并发 start_frpc 都通过
+/// `contains_key` 检查后各自 spawn，后 insert 覆盖前一个 `Child` 导致孤儿进程
+/// （无人追踪、无法 stop、不参与守护、unix 下僵尸）。
+pub enum ProcessEntry {
+    Starting,
+    Running(Child),
+}
+
+/// 带超时的子进程回收（daemon 中-5 修复）。
+///
+/// 原实现 `Child::wait()` 无限期阻塞且在进程表锁内调用：kill 失败时锁被
+/// 永久持有，所有隧道的 start/stop/query 全部挂起。本函数最多等 `timeout`
+/// 后放弃，调用方决定是否继续持有资源。
+pub fn wait_child_timeout(child: &mut Child, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    return false;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => return false,
+        }
+    }
+}
+
 /// frpc 进程管理器。
 pub struct FrpcManager {
     pub data_dir: PathBuf,
-    pub processes: Mutex<HashMap<i32, Child>>,
+    pub processes: Mutex<HashMap<i32, ProcessEntry>>,
     pub persistence: Persistence,
     pub events: broadcast::Sender<Event>,
     pub log_history: LogHistory,
@@ -108,51 +140,29 @@ impl FrpcManager {
         let user_token = config.user_token.clone();
         let node_token = config.node_token.clone();
 
+        // 原子检查 + 占位（daemon 高-3）：并发 start 同 id 只能有一个通过；
+        // 占位后任一步失败必须回滚，否则该 id 永远无法再启动。
         {
-            let procs = self
+            let mut procs = self
                 .processes
                 .lock()
                 .map_err(|e| format!("获取进程锁失败: {}", e))?;
             if procs.contains_key(&tunnel_id) {
-                return Err("该隧道已在运行中".to_string());
+                return Err("该隧道已在运行中或正在启动".to_string());
             }
+            procs.insert(tunnel_id, ProcessEntry::Starting);
         }
 
-        std::fs::create_dir_all(&self.data_dir)
-            .map_err(|e| format!("创建应用目录失败: {}", e))?;
-
-        let config_path = self.data_dir.join(format!("g_{}.ini", tunnel_id));
-        let config_content = generate_frpc_config(&config)?;
-        std::fs::write(&config_path, config_content)
-            .map_err(|e| format!("写入配置文件失败: {}", e))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::metadata(&config_path)
-                .map_err(|e| format!("获取配置文件权限失败: {}", e))?
-                .permissions();
-            let mut perms = perms;
-            perms.set_mode(0o600);
-            std::fs::set_permissions(&config_path, perms)
-                .map_err(|e| format!("设置配置文件权限失败: {}", e))?;
-        }
-
-        let frpc_path = self.resolve_frpc_path()?;
-
-        let mut cmd = StdCommand::new(&frpc_path);
-        cmd.current_dir(&self.data_dir)
-            .arg("-c")
-            .arg(&config_path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        #[cfg(target_os = "windows")]
-        {
-            cmd.creation_flags(0x08000000);
-        }
-
-        let mut child = cmd.spawn().map_err(|e| format!("启动 frpc 失败: {}", e))?;
-        let pid = child.id();
+        let (mut child, pid) = match self.spawn_frpc(&config) {
+            Ok(v) => v,
+            Err(e) => {
+                // 回滚占位（锁中毒时占位残留可接受——进程表已处于异常状态）
+                if let Ok(mut procs) = self.processes.lock() {
+                    procs.remove(&tunnel_id);
+                }
+                return Err(e);
+            }
+        };
 
         let timestamp = chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
         self.emit_log(LogMessage {
@@ -187,17 +197,33 @@ impl FrpcManager {
             );
         }
 
-        {
+        // 占位 → Running；若占位已被并发 stop 移除，取回 child 并杀掉（尊重用户停止）
+        let orphan = {
             let mut procs = self
                 .processes
                 .lock()
                 .map_err(|e| format!("获取进程锁失败: {}", e))?;
-            procs.insert(tunnel_id, child);
+            match procs.get_mut(&tunnel_id) {
+                Some(entry) if matches!(entry, ProcessEntry::Starting) => {
+                    *entry = ProcessEntry::Running(child);
+                    None
+                }
+                _ => Some(child),
+            }
+        };
+        if let Some(mut orphan) = orphan {
+            let _ = orphan.kill();
+            let _ = wait_child_timeout(&mut orphan, Duration::from_secs(5));
+            return Ok("frpc 已停止".to_string());
         }
 
-        let _ = self
-            .persistence
-            .save_running_tunnel(tunnel_id, pid, "api", None);
+        let _ = self.persistence.save_running_tunnel(
+            tunnel_id,
+            pid,
+            "api",
+            None,
+            Some(config.clone()),
+        );
 
         // 加入守护集合（守护启用时生效）
         guard::add_guarded_process(&self.guard, tunnel_id, config);
@@ -205,56 +231,106 @@ impl FrpcManager {
         Ok(format!("frpc 已启动 (PID: {})", pid))
     }
 
-    /// 停止官方隧道 frpc（MutexGuard 先 drop 再走孤儿回收，顺序约束照桌面版）。
+    /// spawn frpc 子进程（配置落盘 + spawn；不含进程表操作，供 start_frpc 占位后调用）。
+    fn spawn_frpc(&self, config: &TunnelConfig) -> Result<(Child, u32), String> {
+        std::fs::create_dir_all(&self.data_dir)
+            .map_err(|e| format!("创建应用目录失败: {}", e))?;
+
+        let config_path = self.data_dir.join(format!("g_{}.ini", config.tunnel_id));
+        let config_content = generate_frpc_config(config)?;
+        std::fs::write(&config_path, config_content)
+            .map_err(|e| format!("写入配置文件失败: {}", e))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::metadata(&config_path)
+                .map_err(|e| format!("获取配置文件权限失败: {}", e))?
+                .permissions();
+            let mut perms = perms;
+            perms.set_mode(0o600);
+            std::fs::set_permissions(&config_path, perms)
+                .map_err(|e| format!("设置配置文件权限失败: {}", e))?;
+        }
+
+        let frpc_path = self.resolve_frpc_path()?;
+
+        let mut cmd = StdCommand::new(&frpc_path);
+        cmd.current_dir(&self.data_dir)
+            .arg("-c")
+            .arg(&config_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        #[cfg(target_os = "windows")]
+        {
+            cmd.creation_flags(0x08000000);
+        }
+
+        let child = cmd.spawn().map_err(|e| format!("启动 frpc 失败: {}", e))?;
+        let pid = child.id();
+        Ok((child, pid))
+    }
+
+    /// 停止官方隧道 frpc（daemon 中-5：先取出进程表条目、释放锁，再 kill + 带超时回收）。
     pub async fn stop_frpc(&self, tunnel_id: i32) -> Result<String, String> {
         // 先移出守护集合并标记手动停止（照桌面版 stop_frpc 首步）
         guard::remove_guarded_process(&self.guard, tunnel_id, true);
 
-        let found_in_manager = {
+        let removed = {
             let mut procs = self
                 .processes
                 .lock()
                 .map_err(|e| format!("获取进程锁失败: {}", e))?;
-
-            if let Some(mut child) = procs.remove(&tunnel_id) {
-                let result = match child.kill() {
-                    Ok(_) => {
-                        let _ = child.wait();
-                        Ok("frpc 已停止".to_string())
-                    }
-                    Err(e) => {
-                        let _ = child.wait();
-                        Err(format!("停止进程失败: {}", e))
-                    }
-                };
-                let _ = self.persistence.remove_running_tunnel(tunnel_id);
-                let config_path = self.data_dir.join(format!("g_{}.ini", tunnel_id));
-                if config_path.exists() {
-                    let _ = std::fs::remove_file(&config_path);
-                }
-                return result;
-            }
-            false
+            procs.remove(&tunnel_id)
         };
 
-        if !found_in_manager {
-            let app_dir = self.data_dir.clone();
-            if let Some(info) = self
-                .persistence
-                .get_all_records()
-                .into_iter()
-                .find(|t| t.tunnel_id == tunnel_id)
-            {
-                let _ = self.persistence.kill_orphan(tunnel_id, info.pid);
+        if let Some(entry) = removed {
+            if let ProcessEntry::Running(mut child) = entry {
+                // 锁外 kill；回收阻塞移入 spawn_blocking（async 上下文不持锁阻塞）
+                child
+                    .kill()
+                    .map_err(|e| format!("停止进程失败: {}", e))?;
+                let waited = tokio::task::spawn_blocking(move || {
+                    wait_child_timeout(&mut child, Duration::from_secs(5))
+                })
+                .await
+                .unwrap_or(false);
+                if !waited {
+                    let timestamp =
+                        chrono::Local::now().format("%Y/%m/%d %H:%M:%S").to_string();
+                    self.emit_log(LogMessage {
+                        tunnel_id,
+                        message: "[W] [ChmlFrpLauncher] frpc 进程 5 秒内未退出，放弃等待"
+                            .to_string(),
+                        timestamp,
+                    });
+                }
             }
-            let config_path = app_dir.join(format!("g_{}.ini", tunnel_id));
+            // Starting 占位：spawn 可能尚未发生；移除占位即停止
+            //（start 侧升级失败时会自行杀掉刚 spawn 的进程）
+            let _ = self.persistence.remove_running_tunnel(tunnel_id);
+            let config_path = self.data_dir.join(format!("g_{}.ini", tunnel_id));
             if config_path.exists() {
                 let _ = std::fs::remove_file(&config_path);
             }
-            Ok("frpc 已停止".to_string())
-        } else {
-            Ok("frpc 已停止".to_string())
+            return Ok("frpc 已停止".to_string());
         }
+
+        // 不在进程管理器：孤儿回收（持久化 PID 兜底）
+        let app_dir = self.data_dir.clone();
+        if let Some(info) = self
+            .persistence
+            .get_all_records()
+            .into_iter()
+            .find(|t| t.tunnel_id == tunnel_id)
+        {
+            let _ = self.persistence.kill_orphan(tunnel_id, info.pid);
+        }
+        let config_path = app_dir.join(format!("g_{}.ini", tunnel_id));
+        if config_path.exists() {
+            let _ = std::fs::remove_file(&config_path);
+        }
+        Ok("frpc 已停止".to_string())
     }
 
     /// 查询隧道是否运行（进程表优先，持久化 PID 兜底）。
@@ -265,19 +341,23 @@ impl FrpcManager {
                 .lock()
                 .map_err(|e| format!("获取进程锁失败: {}", e))?;
 
-            if let Some(child) = procs.get_mut(&tunnel_id) {
-                match child.try_wait() {
-                    Ok(Some(_)) => {
-                        procs.remove(&tunnel_id);
-                        let _ = self.persistence.remove_running_tunnel(tunnel_id);
-                        Some(false)
-                    }
-                    Ok(None) => Some(true),
-                    Err(_) => {
-                        procs.remove(&tunnel_id);
-                        let _ = self.persistence.remove_running_tunnel(tunnel_id);
-                        Some(false)
-                    }
+            if let Some(entry) = procs.get_mut(&tunnel_id) {
+                match entry {
+                    // 占位态：启动中视为运行（守护不会误判离线而重复拉起）
+                    ProcessEntry::Starting => Some(true),
+                    ProcessEntry::Running(child) => match child.try_wait() {
+                        Ok(Some(_)) => {
+                            procs.remove(&tunnel_id);
+                            let _ = self.persistence.remove_running_tunnel(tunnel_id);
+                            Some(false)
+                        }
+                        Ok(None) => Some(true),
+                        Err(_) => {
+                            procs.remove(&tunnel_id);
+                            let _ = self.persistence.remove_running_tunnel(tunnel_id);
+                            Some(false)
+                        }
+                    },
                 }
             } else {
                 None
@@ -306,10 +386,13 @@ impl FrpcManager {
         let mut running_tunnels = Vec::new();
         let mut stopped_tunnels = Vec::new();
 
-        for (tunnel_id, child) in procs.iter_mut() {
-            match child.try_wait() {
-                Ok(None) => running_tunnels.push(*tunnel_id),
-                _ => stopped_tunnels.push(*tunnel_id),
+        for (tunnel_id, entry) in procs.iter_mut() {
+            match entry {
+                ProcessEntry::Starting => running_tunnels.push(*tunnel_id),
+                ProcessEntry::Running(child) => match child.try_wait() {
+                    Ok(None) => running_tunnels.push(*tunnel_id),
+                    _ => stopped_tunnels.push(*tunnel_id),
+                },
             }
         }
         for tunnel_id in &stopped_tunnels {
@@ -471,27 +554,28 @@ pub fn sanitize_log(message: &str, secrets: &[&str]) -> String {
 fn sanitize_token(message: &str, token: &str) -> String {
     let mut result = message.to_string();
 
+    // 1. 完整 token 及其常见粘连形式（token. / token-）直接移除
     result = result.replace(&format!("{}.", token), "");
     result = result.replace(&format!("{}-", token), "");
     result = result.replace(token, "");
 
-    if let Some(dot_pos) = token.find('.') {
-        let first_part = &token[..dot_pos];
-        let second_part = &token[dot_pos + 1..];
-
-        if first_part.len() >= 6 {
-            result = result.replace(first_part, "***");
-        }
-        if second_part.len() >= 6 {
-            result = result.replace(second_part, "***");
+    // 2. 逐段掩码：token 的每个 `.` 分割段（长度 ≥6）单独替换。
+    //    覆盖「日志只含某一段（尾段/中段单独出现、与上下文粘连）」的场景；
+    //    短段（如 "token"）不掩码——是常见词，掩码会误伤正常日志。
+    for seg in token.split('.') {
+        if seg.len() >= 6 {
+            result = result.replace(seg, "***");
         }
     }
 
-    if token.len() >= 10 {
+    // 3. 滑动窗口兜底：token 的任意 ≥8 连续子串（含后缀窗口，旧实现只扫前缀）。
+    //    覆盖无 `.` 分隔的长 token 被截断打印的场景。窗口从大到小，
+    //    避免短窗口先替换破坏长窗口的匹配。
+    if token.len() >= 8 {
         for window_size in (8..=token.len()).rev() {
-            if window_size <= token.len() {
-                let substr = &token[..window_size];
-                if result.contains(substr) && substr.len() >= 8 {
+            for start in 0..=token.len() - window_size {
+                let substr = &token[start..start + window_size];
+                if result.contains(substr) {
                     result = result.replace(substr, "***");
                 }
             }
@@ -503,7 +587,7 @@ fn sanitize_token(message: &str, token: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_log;
+    use super::*;
 
     const USER_TOKEN: &str = "user.token.abc123.ABC789xyz";
     const NODE_TOKEN: &str = "node.token.xyz789.NOP456abc";
@@ -530,6 +614,153 @@ mod tests {
         let out = sanitize_log(&msg, &[NODE_TOKEN]);
         assert!(!out.contains("NOP456abc"), "token 长片段泄漏: {out}");
         assert!(out.contains("suffix"), "正常内容被误伤: {out}");
+    }
+
+    // —— 以下为「真实分片场景」测试：消息只含 token 的某一段，不含完整 token ——
+    // （旧测试的消息含完整 token，整串先被移除，从未覆盖分片单独出现的场景）
+
+    #[test]
+    fn 中段分片单独出现不泄漏() {
+        let out = sanitize_log("error in abc123 end", &[USER_TOKEN]);
+        assert!(!out.contains("abc123"), "中段分片泄漏: {out}");
+        assert!(out.contains("error in") && out.contains("end"), "正常内容被误伤: {out}");
+    }
+
+    #[test]
+    fn 尾段分片单独出现不泄漏() {
+        let out = sanitize_log("tail ABC789xyz", &[USER_TOKEN]);
+        assert!(!out.contains("ABC789xyz"), "尾段分片泄漏: {out}");
+        assert!(out.contains("tail"), "正常内容被误伤: {out}");
+    }
+
+    #[test]
+    fn 分片与上下文粘连不泄漏() {
+        let out = sanitize_log("xxabc123yy", &[USER_TOKEN]);
+        assert!(!out.contains("abc123"), "粘连分片泄漏: {out}");
+    }
+
+    #[test]
+    fn 短分片不掩码_避免误伤常见词() {
+        // "token"（5 字符）是常见词，掩码会误伤正常日志——只掩码 ≥6 的分段
+        let out = sanitize_log("the token field", &[USER_TOKEN]);
+        assert!(out.contains("token"), "短分片不应被掩码: {out}");
+    }
+
+    // —— A5/A6：进程表占位状态 + 锁外 kill/回收 ——
+
+    use crate::events::LogHistory;
+    use crate::guard::GuardState;
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+
+    fn test_manager(data_dir: std::path::PathBuf) -> Arc<FrpcManager> {
+        let (tx, _) = broadcast::channel(16);
+        let history: LogHistory = Arc::new(Mutex::new(VecDeque::new()));
+        Arc::new(FrpcManager::new(
+            data_dir,
+            tx,
+            history,
+            GuardState::new(),
+        ))
+    }
+
+    fn test_config() -> TunnelConfig {
+        TunnelConfig {
+            tunnel_id: 1,
+            tunnel_name: "test".to_string(),
+            user_token: "user".to_string(),
+            server_addr: "test.example.com".to_string(),
+            server_port: 7000,
+            node_token: "node".to_string(),
+            tunnel_type: "tcp".to_string(),
+            local_ip: "127.0.0.1".to_string(),
+            local_port: 80,
+            remote_port: Some(1234),
+            custom_domains: None,
+            http_proxy: None,
+            log_level: "info".to_string(),
+            force_tls: false,
+            kcp_optimization: false,
+        }
+    }
+
+    fn temp_data_dir(suffix: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "fnos-frpc-{}-{}-{}",
+            suffix,
+            std::process::id(),
+            std::thread::current().name().unwrap_or("t").replace(':', "_")
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    #[tokio::test]
+    async fn start失败时回滚占位() {
+        // 无 frpc 二进制且无 FRPC_PATH → spawn 前报错，Starting 占位必须回滚，
+        // 否则该 tunnel_id 永远无法再启动（daemon 高-3）
+        let dir = temp_data_dir("rollback");
+        let mgr = test_manager(dir.clone());
+        let err = mgr.start_frpc(test_config()).await.unwrap_err();
+        assert!(err.contains("frpc 未找到"), "err: {err}");
+        assert!(mgr.processes.lock().unwrap().is_empty(), "占位未回滚");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn 并发start同id被占位拒绝() {
+        let dir = temp_data_dir("double-start");
+        let mgr = test_manager(dir.clone());
+        mgr.processes
+            .lock()
+            .unwrap()
+            .insert(1, ProcessEntry::Starting);
+        let err = mgr.start_frpc(test_config()).await.unwrap_err();
+        assert!(err.contains("已在运行中或正在启动"), "err: {err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn 停止占位态_干净移除() {
+        let dir = temp_data_dir("stop-starting");
+        let mgr = test_manager(dir.clone());
+        mgr.processes
+            .lock()
+            .unwrap()
+            .insert(1, ProcessEntry::Starting);
+        let res = mgr.stop_frpc(1).await.unwrap();
+        assert!(res.contains("已停止"), "res: {res}");
+        assert!(mgr.processes.lock().unwrap().is_empty(), "占位未移除");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stop_锁外kill并回收子进程() {
+        // daemon 中-5：kill/wait 不得在进程表锁内无限阻塞——用 sleep 假进程验证
+        let dir = temp_data_dir("kill-reap");
+        let mgr = test_manager(dir.clone());
+        let child = StdCommand::new("sleep")
+            .arg("300")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        mgr.processes
+            .lock()
+            .unwrap()
+            .insert(1, ProcessEntry::Running(child));
+
+        let res = mgr.stop_frpc(1).await.unwrap();
+        assert!(res.contains("已停止"), "res: {res}");
+
+        // 子进程已被 kill 并回收（kill(pid, 0) 返回 ESRCH）
+        let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
+        assert!(!alive, "子进程仍存活（pid {pid}）");
+        // 锁可再次获取（未被死锁持有）
+        assert!(mgr.processes.lock().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

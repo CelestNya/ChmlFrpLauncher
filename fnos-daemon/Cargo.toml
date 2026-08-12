@@ -28,3 +28,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tar = "0.4"
 flate2 = "1"
 socket2 = { version = "0.5", features = ["all"] }
+# 测试用：tokio test-util（start_paused 虚拟时钟，守护状态机时序测试）
+[dev-dependencies]
+tokio = { version = "1.48", features = ["test-util"] }
