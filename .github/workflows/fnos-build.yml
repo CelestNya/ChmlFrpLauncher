@@ -19,10 +19,10 @@ jobs:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
-    # aarch64 musl 链接器（zig cc + wrapper；x86_64 不使用，无副作用）
+    # aarch64 musl 链接器（musl.cc 工具链；x86_64 不使用，无副作用）
     env:
-      CC_aarch64_unknown_linux_musl: "zigcc"
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: "zigcc"
+      CC_aarch64_unknown_linux_musl: "aarch64-linux-musl-gcc"
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: "aarch64-linux-musl-gcc"
 
     steps:
       - name: Checkout
@@ -63,30 +63,26 @@ jobs:
             musl-tools \
             pkg-config \
             patch \
-            python3-pil \
-            gcc-aarch64-linux-gnu
+            python3-pil
 
       # aarch64 musl 交叉链接器：zig cc（zig 自带 musl libc，GitHub release 下载稳定；
       # musl.cc 预编译工具链在 runner 上超时）。apt 的 gcc-aarch64-linux-gnu 是 gnu 交叉，
       # 不满足 daemon 的 musl 静态编译要求（fnOS glibc 2.36）。
-      - name: Setup zig (aarch64 musl linker)
+      - name: Setup aarch64 musl toolchain
         if: matrix.arch == 'aarch64'
         run: |
-          # zig 0.12.1 + gcc 兼容 wrapper：
-          # ring 探测用 `zig -E`（带 rustc 风格 -target 三字段，zig 不认），
-          # wrapper 把 target 参数转成 zig 格式（aarch64-unknown-linux-musl → aarch64-linux-musl）
-          curl -fsSL -o /tmp/zig.tar.xz https://ziglang.org/download/0.12.1/zig-linux-x86_64-0.12.1.tar.xz
-          tar xf /tmp/zig.tar.xz -C /tmp
-          /tmp/zig-linux-x86_64-0.12.1/zig version
-
-          ZIG_BIN=/tmp/zig-linux-x86_64-0.12.1/zig
-          mkdir -p /tmp/zig-wrapper
-          # wrapper：仅把首个 target 位置参数换成 zig 格式（路径参数不受影响）
-          WRAPPER_B64="IyEvdXNyL2Jpbi9lbnYgYmFzaAojIHppZyBjYyB3cmFwcGVyOiBmaXJzdCBhcmcgKHRhcmdldCkgcnVzdGMgc3R5bGUgLT4gemlnIGZvcm1hdCwgcmVzdCBwYXNzZWQgdGhyb3VnaAppZiBbWyAiJDEiID09ICJhYXJjaDY0LXVua25vd24tbGludXgtbXVzbCIgXV07IHRoZW4KICBzZXQgLS0gImFhcmNoNjQtbGludXgtbXVzbCIgIiR7QDoyfSIKZmkKZXhlYyAvdG1wL3ppZy1saW51eC14ODZfNjQtMC4xMi4xL3ppZyBjYyAiJEAiCg=="
-          echo "$WRAPPER_B64" | base64 -d > /tmp/zig-wrapper/zigcc
-          chmod +x /tmp/zig-wrapper/zigcc
-          /tmp/zig-wrapper/zigcc -v >/dev/null 2>&1 && echo "zigcc wrapper OK"
-          echo "/tmp/zig-wrapper" >> "$GITHUB_PATH"
+          # aarch64-linux-musl-cross 交叉工具链（musl.cc，预编译 gcc，ring 完全兼容）
+          # GitHub release 在 runner 上会超时，用重试 + 更长超时兜底
+          for i in 1 2 3; do
+            curl --retry 3 --retry-delay 5 --connect-timeout 30 -fsSL \
+              -o /tmp/aarch64-musl.tgz https://musl.cc/aarch64-linux-musl-cross.tgz \
+              && [ -s /tmp/aarch64-musl.tgz ] && break
+            echo "下载失败，重试 $i/3…"
+            sleep 5
+          done
+          tar xzf /tmp/aarch64-musl.tgz -C /tmp
+          /tmp/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc --version | head -1
+          echo "/tmp/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
 
       # 官方 fnpack 打包工具（build-fpk.sh 内部也有自动下载兜底）
       - name: Setup fnpack
