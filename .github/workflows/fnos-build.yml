@@ -72,10 +72,11 @@ jobs:
       - name: Setup zig (aarch64 musl linker)
         if: matrix.arch == 'aarch64'
         run: |
-          curl -fsSL -o /tmp/zig.tar.xz https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
+          # zig 0.12.1：ring 0.17 的编译探测兼容（0.13 裸 `zig -E` 报 UnknownOperatingSystem）
+          curl -fsSL -o /tmp/zig.tar.xz https://ziglang.org/download/0.12.1/zig-linux-x86_64-0.12.1.tar.xz
           tar xf /tmp/zig.tar.xz -C /tmp
-          /tmp/zig-linux-x86_64-0.13.0/zig version
-          echo "/tmp/zig-linux-x86_64-0.13.0" >> "$GITHUB_PATH"
+          /tmp/zig-linux-x86_64-0.12.1/zig version
+          echo "/tmp/zig-linux-x86_64-0.12.1" >> "$GITHUB_PATH"
 
       # 官方 fnpack 打包工具（build-fpk.sh 内部也有自动下载兜底）
       - name: Setup fnpack
