@@ -26,9 +26,33 @@ const shimSrc = path.join(ROOT, "fnos-shim", "tauri-shim.ts");
 
 const MARKER = "<!-- fnos-shim -->";
 
-/** 在 pnpm store 中定位 esbuild 包的 CLI 脚本（无 bin link 时可用）。 */
-function findEsbuildCli() {
+/** 平台名：win32-x64 / linux-x64 / darwin-arm64 等（对应 esbuild 平台包目录名）。 */
+function platformName() {
+  return `${process.platform}-${process.arch}`;
+}
+
+/**
+ * 在 pnpm store 中定位 esbuild **平台原生二进制**（@esbuild/<platform>/bin/esbuild）。
+ * 直接 execFileSync 运行，不经 node——node 20 在 Linux 上运行 bin JS 包装会
+ * 因模块语法解析失败（SyntaxError），CI 已实测踩坑。
+ * 找不到时退回 esbuild JS 包装（node 运行）。
+ */
+function findEsbuildBin() {
   const pnpmDir = path.join(ROOT, "node_modules", ".pnpm");
+  const plat = platformName();
+  const nativeBin = path.join(
+    pnpmDir,
+    `@esbuild+${plat}`,
+    "node_modules",
+    "@esbuild",
+    plat,
+    "bin",
+    process.platform === "win32" ? "esbuild.exe" : "esbuild",
+  );
+  if (fs.existsSync(nativeBin)) {
+    return { bin: nativeBin, useNode: false };
+  }
+  // 退回 JS 包装（本机 store 结构异常时）
   try {
     const candidates = fs
       .readdirSync(pnpmDir)
@@ -44,29 +68,29 @@ function findEsbuildCli() {
         "bin",
         "esbuild",
       );
-      if (fs.existsSync(cli)) return cli;
+      if (fs.existsSync(cli)) return { bin: cli, useNode: true };
     }
   } catch {
-    // 找不到则退回环境变量里的 esbuild
+    // 兜底环境变量里的 esbuild
   }
-  return "esbuild";
+  return { bin: "esbuild", useNode: false };
 }
 
-const ESBUILD_CLI = findEsbuildCli();
+const ESBUILD = findEsbuildBin();
 
 function compileShim() {
   // 无 import/export 的 IIFE 文件，--format=esm 原样输出（仅做 TS→JS + minify）
-  return execFileSync(
-    process.execPath,
-    [
-      ESBUILD_CLI,
-      shimSrc,
-      "--format=esm",
-      "--minify",
-      "--target=es2017",
-    ],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-  ).trim();
+  const args = [
+    ESBUILD.bin,
+    shimSrc,
+    "--format=esm",
+    "--minify",
+    "--target=es2017",
+  ];
+  return execFileSync(ESBUILD.useNode ? process.execPath : ESBUILD.bin, args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 
 function injectShim(html, shimJs) {
