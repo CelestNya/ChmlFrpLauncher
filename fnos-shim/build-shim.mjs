@@ -35,22 +35,34 @@ function platformName() {
  * 在 pnpm store 中定位 esbuild **平台原生二进制**（@esbuild/<platform>/bin/esbuild）。
  * 直接 execFileSync 运行，不经 node——node 20 在 Linux 上运行 bin JS 包装会
  * 因模块语法解析失败（SyntaxError），CI 已实测踩坑。
+ * pnpm 平台包目录带版本号（@esbuild+linux-x64@0.27.2），需扫描而非硬拼。
  * 找不到时退回 esbuild JS 包装（node 运行）。
  */
 function findEsbuildBin() {
   const pnpmDir = path.join(ROOT, "node_modules", ".pnpm");
   const plat = platformName();
-  const nativeBin = path.join(
-    pnpmDir,
-    `@esbuild+${plat}`,
-    "node_modules",
-    "@esbuild",
-    plat,
-    "bin",
-    process.platform === "win32" ? "esbuild.exe" : "esbuild",
-  );
-  if (fs.existsSync(nativeBin)) {
-    return { bin: nativeBin, useNode: false };
+  try {
+    const nativeDir = fs
+      .readdirSync(pnpmDir)
+      .filter((d) => d.startsWith(`@esbuild+${plat}@`))
+      .sort()
+      .reverse()[0];
+    if (nativeDir) {
+      const nativeBin = path.join(
+        pnpmDir,
+        nativeDir,
+        "node_modules",
+        "@esbuild",
+        plat,
+        "bin",
+        process.platform === "win32" ? "esbuild.exe" : "esbuild",
+      );
+      if (fs.existsSync(nativeBin)) {
+        return { bin: nativeBin, useNode: false };
+      }
+    }
+  } catch {
+    // 继续走 JS 包装兜底
   }
   // 退回 JS 包装（本机 store 结构异常时）
   try {
