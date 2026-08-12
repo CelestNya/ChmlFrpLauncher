@@ -81,8 +81,8 @@ jobs:
 
           ZIG_BIN=/tmp/zig-linux-x86_64-0.12.1/zig
           mkdir -p /tmp/zig-wrapper
-          # wrapper：把 rustc 风格 target 换成 zig 格式（参数替换，避免数组语法歧义）
-          WRAPPER_B64="IyEvdXNyL2Jpbi9lbnYgYmFzaAojIHppZyBjYyBnY2MgY29tcGF0aWJsZSB3cmFwcGVyOiBjb252ZXJ0IHJ1c3RjIHN0eWxlIHRhcmdldCB0byB6aWcgZm9ybWF0CnNldCAtLSAiJHtALy9hYXJjaDY0LXVua25vd24tbGludXgtbXVzbC9hYXJjaDY0LWxpbnV4LW11c2x9IgpleGVjIC90bXAvemlnLWxpbnV4LXg4Nl82NC0wLjEyLjEvemlnIGNjICIkQCIK"
+          # wrapper：仅把首个 target 位置参数换成 zig 格式（路径参数不受影响）
+          WRAPPER_B64="IyEvdXNyL2Jpbi9lbnYgYmFzaAojIHppZyBjYyB3cmFwcGVyOiBmaXJzdCBhcmcgKHRhcmdldCkgcnVzdGMgc3R5bGUgLT4gemlnIGZvcm1hdCwgcmVzdCBwYXNzZWQgdGhyb3VnaAppZiBbWyAiJDEiID09ICJhYXJjaDY0LXVua25vd24tbGludXgtbXVzbCIgXV07IHRoZW4KICBzZXQgLS0gImFhcmNoNjQtbGludXgtbXVzbCIgIiR7QDoyfSIKZmkKZXhlYyAvdG1wL3ppZy1saW51eC14ODZfNjQtMC4xMi4xL3ppZyBjYyAiJEAiCg=="
           echo "$WRAPPER_B64" | base64 -d > /tmp/zig-wrapper/zigcc
           chmod +x /tmp/zig-wrapper/zigcc
           /tmp/zig-wrapper/zigcc -v >/dev/null 2>&1 && echo "zigcc wrapper OK"
