@@ -344,14 +344,14 @@
     invoke: (
       cmd: string,
       args: Record<string, unknown> = {},
-      _options?: unknown,
     ) => {
       if (cmd.startsWith("plugin:")) return invokePlugin(cmd, args);
       return invokeCommand(cmd, args);
     },
     transformCallback,
     unregisterCallback,
-    convertFileSrc: (filePath: string, _protocol = "asset") => filePath,
+    // Tauri 原签名 (filePath, protocol)：protocol 在 fnOS 网关下无意义，多余实参 JS 自动忽略
+    convertFileSrc: (filePath: string) => filePath,
     metadata: {
       currentWindow: { label: "main" },
       currentWebview: { label: "main" },
