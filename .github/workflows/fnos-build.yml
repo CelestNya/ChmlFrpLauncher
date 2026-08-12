@@ -81,8 +81,8 @@ jobs:
 
           ZIG_BIN=/tmp/zig-linux-x86_64-0.12.1/zig
           mkdir -p /tmp/zig-wrapper
-          # wrapper 内容经 base64 写入（避免 heredoc 在 YAML run 块的缩进解析问题）
-          WRAPPER_B64=$(echo "IyEvdXNyL2Jpbi9lbnYgYmFzaAojaGVyZWRvYyBlbmQKIyB6aWcgY2MgZ2NjIGNvbXBhdGlibGUgd3JhcHBlcjogY29udmVydCBydXN0YyBzdHlsZSB0YXJnZXQgdG8gemlnIGZvcm1hdAphcmdzPSgKZm9yIGEgaW4gIiRAIjsgZG8KICBpZiBbWyAiJGEiID09ICJhYXJjaDY0LXVua25vd24tbGludXgtbXVzbCIgXV07IHRoZW4KICAgIGFyZ3MrPSgiYWFyY2g2NC1saW51eC1tdXNsIikKICBlbHNlCiAgICBhcmdzKz0oIiRhIikKICBmaQpkb25lCmV4ZWMgL3RtcC96aWctbGludXgteDg2XzY0LTAuMTIuMS96aWcgY2MgIiR7YXJnc1tAXX0iCiM=")
+          # wrapper：把 rustc 风格 target 换成 zig 格式（参数替换，避免数组语法歧义）
+          WRAPPER_B64="IyEvdXNyL2Jpbi9lbnYgYmFzaAojIHppZyBjYyBnY2MgY29tcGF0aWJsZSB3cmFwcGVyOiBjb252ZXJ0IHJ1c3RjIHN0eWxlIHRhcmdldCB0byB6aWcgZm9ybWF0CnNldCAtLSAiJHtALy9hYXJjaDY0LXVua25vd24tbGludXgtbXVzbC9hYXJjaDY0LWxpbnV4LW11c2x9IgpleGVjIC90bXAvemlnLWxpbnV4LXg4Nl82NC0wLjEyLjEvemlnIGNjICIkQCIK"
           echo "$WRAPPER_B64" | base64 -d > /tmp/zig-wrapper/zigcc
           chmod +x /tmp/zig-wrapper/zigcc
           /tmp/zig-wrapper/zigcc -v >/dev/null 2>&1 && echo "zigcc wrapper OK"
