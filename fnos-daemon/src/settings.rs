@@ -31,6 +31,17 @@ pub struct Credential {
     pub access_token_expires_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_type: Option<String>,
+    // 用户画像字段（前端 StoredUser 完整往返，review P2：丢失会破坏会员门控）
+    // usergroup 是会员等级判断的关键（NodeSelector/EditTunnelDialog 用
+    // user?.usergroup 决定免费/会员），丢字段 = 免费用户可绕过 VIP 节点拦截。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usergroup: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub userimg: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel_count: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel: Option<i32>,
 }
 
 impl Credential {
@@ -199,6 +210,10 @@ mod tests {
             refresh_token: Some("refresh".to_string()),
             access_token_expires_at: Some(1750000000),
             token_type: Some("Bearer".to_string()),
+            usergroup: Some("free".to_string()),
+            userimg: Some("img.png".to_string()),
+            tunnel_count: Some(3),
+            tunnel: Some(2),
         }
     }
 

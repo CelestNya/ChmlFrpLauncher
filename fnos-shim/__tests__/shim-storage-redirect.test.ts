@@ -257,6 +257,45 @@ describe("fnos-shim localStorage 重定向（阶段 1c）", () => {
     expect(localStorage.getItem("chmlfrp_user")).toBeNull();
   });
 
+  it("凭据完整往返：usergroup/tunnelCount 等用户画像字段不丢（review P2）", async () => {
+    setBoot(null, null);
+    const { calls } = stubInvoke();
+    loadShim();
+
+    // 前端 saveStoredUser 写入的完整 StoredUser（含 usergroup）
+    localStorage.setItem(
+      "chmlfrp_user",
+      JSON.stringify({
+        username: "u",
+        usergroup: "free",
+        userimg: "img.png",
+        accessToken: "access",
+        refreshToken: "refresh",
+        tokenType: "Bearer",
+        accessTokenExpiresAt: 1750000000,
+        tunnelCount: 3,
+        tunnel: 2,
+      }),
+    );
+
+    // daemon 收到完整字段（snake_case）
+    await vi.waitFor(() => {
+      expect(calls.some((c) => c.cmd === "save_credential")).toBe(true);
+    });
+    const save = calls.find((c) => c.cmd === "save_credential")!;
+    const cred = save.args.credential as Record<string, unknown>;
+    expect(cred.usergroup).toBe("free");
+    expect(cred.tunnel_count).toBe(3);
+
+    // 回读同步命中缓存 → camelCase 还原 usergroup（会员门控关键字段）
+    const back = JSON.parse(localStorage.getItem("chmlfrp_user")!) as {
+      usergroup: string;
+      tunnelCount: number;
+    };
+    expect(back.usergroup).toBe("free");
+    expect(back.tunnelCount).toBe(3);
+  });
+
   it("登出顺序：先停隧道再清凭据（ADR-0002 定死）", async () => {
     // 模拟 logout.ts performLogout：先 stopAllRunningTunnels（stop_frpc），
     // 再 clearStoredUser（shim 拦截转 clear_credential）

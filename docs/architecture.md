@@ -373,7 +373,7 @@ shim 拦截（fnOS 构建注入，先于 bundle 执行）
 daemon credential.json / node_settings.json（0600）
 ```
 
-- **能力协商**：`GET /api/capabilities` + `invoke.rs::SUPPORTED_COMMANDS`；NO_OP 桌面专属命令明确「不支持」（原 13 个减至 8 个，背景 4 命令已恢复实现）
+- **能力协商**：`GET /api/capabilities` + `invoke.rs::SUPPORTED_COMMANDS`；NO_OP 桌面专属命令明确「不支持」（原 13 个减至 9 个，背景 4 命令已恢复实现）
 - **凭据/配置后端化**：`fnos-daemon/src/settings.rs`（credential + node_settings，0600）
 - **壁纸文件化**：`fnos-daemon/src/background.rs` + `/assets/backgrounds/` 静态托管；fnOS 砍轮播（ADR-0004）
 - **首帧 boot**：daemon `serve_index_with_boot` 注入 `__FNOS_BOOT__`（credential+nodeSettings），shim 同步读防闪烁

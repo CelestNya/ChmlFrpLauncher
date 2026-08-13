@@ -546,6 +546,10 @@ mod tests {
                 refresh_token: Some("refresh".to_string()),
                 access_token_expires_at: Some(1750000000),
                 token_type: Some("Bearer".to_string()),
+                usergroup: None,
+                userimg: None,
+                tunnel_count: None,
+                tunnel: None,
             })
             .unwrap();
 

@@ -453,10 +453,13 @@
                 dataUrl,
                 fileName: file.name || `bg-${Date.now()}.png`,
               })) as string;
-              // 拼成 daemon 静态托管 URL（/assets/backgrounds/<file>，网关前缀
-              // 由浏览器相对路径解析自动加——前端当 img src 直接渲染）
+              // 用 new URL(rel, location.href) 解析出含网关前缀的绝对 URL：
+              // 页面 URL 是 /app/chmlfrp/...，相对 assets/... 解析到
+              // /app/chmlfrp/assets/backgrounds/<file>（走网关 → daemon 托管）。
+              // ⚠️ 不能直接存相对路径——localStorage 渲染类留守后刷新/路由变化
+              // 相对解析可能错；绝对 URL 含 /app/chmlfrp/ 前缀稳定可渲染。review P3。
               finish(rel.startsWith("backgrounds/")
-                ? `/assets/${rel}`
+                ? new URL(`assets/${rel}`, location.href).href
                 : rel);
             } catch {
               // daemon 不可达：退回 dataURL（前端仍可渲染，仅不持久化）
@@ -564,6 +567,8 @@
   }
 
   // daemon snake_case ↔ 前端 camelCase（StoredUser 原始格式）
+  // ⚠️ 必须完整往返：丢 usergroup 会破坏会员门控（NodeSelector/EditTunnelDialog
+  // 用 user?.usergroup 决定免费/会员，免费用户可绕过 VIP 节点拦截）。review P2。
   function credentialToStoredUser(c: JsonObject): JsonObject {
     const out: JsonObject = {};
     if (c.username !== undefined) out.username = c.username;
@@ -574,6 +579,10 @@
       out.accessTokenExpiresAt = c.access_token_expires_at;
     }
     if (c.token_type !== undefined) out.tokenType = c.token_type;
+    if (c.usergroup !== undefined) out.usergroup = c.usergroup;
+    if (c.userimg !== undefined) out.userimg = c.userimg;
+    if (c.tunnel_count !== undefined) out.tunnelCount = c.tunnel_count;
+    if (c.tunnel !== undefined) out.tunnel = c.tunnel;
     return out;
   }
 
@@ -587,6 +596,10 @@
       out.access_token_expires_at = s.accessTokenExpiresAt;
     }
     if (s.tokenType !== undefined) out.token_type = s.tokenType;
+    if (s.usergroup !== undefined) out.usergroup = s.usergroup;
+    if (s.userimg !== undefined) out.userimg = s.userimg;
+    if (s.tunnelCount !== undefined) out.tunnel_count = s.tunnelCount;
+    if (s.tunnel !== undefined) out.tunnel = s.tunnel;
     return out;
   }
 

@@ -3,7 +3,7 @@
 //
 // ADR-0004：fnOS 壁纸从 base64 dataURL 改为文件路径。选图后 shim 把 dataURL
 // 上传 daemon（save_background_image，解 base64 落盘 data_dir/backgrounds/），
-// 返回 /assets/backgrounds/<file> 托管 URL（浏览器相对路径，网关前缀自动加）。
+// 返回 assets/backgrounds/<file> 相对托管 URL（网关前缀 /app/chmlfrp/ 由浏览器相对解析自动加）。
 // 前端 getBackgroundType 识别非 data:/app:// 前缀直接当 src，形态兼容。
 
 import { readFileSync } from "node:fs";
@@ -101,6 +101,11 @@ describe("fnos-shim dialog.open 壁纸托管（阶段 2b）", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    // 模拟 fnOS 网关环境：页面 URL 在 /app/chmlfrp/ 前缀下
+    const origHref = window.location.href;
+    // jsdom 只读 location.href，用 history.replaceState 改路径
+    window.history.replaceState({}, "", "/app/chmlfrp/");
+
     // 模拟选图：触发 shim 内部 input 的 onchange（需要拿到 shim 创建的 input）
     // ——shim 内部 input.click() 被 spy 记录，但 onchange 是内部闭包。改用
     // document 上被 mock 的 input 实例：先调 invoke 拿到 Promise，再手动触发
@@ -125,13 +130,16 @@ describe("fnos-shim dialog.open 壁纸托管（阶段 2b）", () => {
     (input as unknown as { onchange: (() => void) | null }).onchange?.();
 
     const result = await promise;
-    // 返回托管 URL（非 dataURL）
-    expect(result).toBe("/assets/backgrounds/my-bg.png");
+    // 返回含网关前缀的绝对 URL（/app/chmlfrp/assets/backgrounds/<file>）——
+    // new URL(rel, location.href) 解析，存储后刷新/路由变化稳定可渲染
+    expect(result).toBe("http://localhost:3000/app/chmlfrp/assets/backgrounds/my-bg.png");
     expect(captured).not.toBeNull();
     expect(captured!.cmd).toBe("save_background_image");
     const args = captured!.args as { dataUrl: string; fileName: string };
     expect(args.dataUrl).toBe(dataUrl);
     expect(args.fileName).toBe("my-bg.png");
+
+    window.history.replaceState({}, "", origHref);
   });
 
   it("2MB 上限仍生效（拒绝超大文件）", async () => {

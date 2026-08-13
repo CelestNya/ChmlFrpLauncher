@@ -111,15 +111,6 @@ fn parse_args<T: DeserializeOwned>(args: Option<Value>) -> Result<T, String> {
 /// 命令分发表：C2 登记进程管理；后续批次陆续登记守护/下载/网络/自定义隧道。
 async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Value, String> {
     match cmd {
-        // ---- 能力协商（ADR-0001）：前端按能力面自适应，替代「假装支持」 ----
-        // 返回 daemon 实际支持的命令集合（不含 NO_OP 桌面专属命令）。
-        // 前端可据此决定 UI 入口与降级路径；桌面版 Tauri 无此端点（能力=全部）。
-        "capabilities" => {
-            Ok(json!({
-                "commands": SUPPORTED_COMMANDS,
-            }))
-        }
-
         // ---- frpc 进程管理（C2） ----
         "start_frpc" => {
             #[derive(Deserialize)]
