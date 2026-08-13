@@ -329,13 +329,35 @@ updater 插件（minisign 签名，公钥内置于 tauri.conf.json）：`https:/
 
 ## 八、待商榷 / 意向
 
-### fnOS 移植（决策已定，见项目记忆 fnos-porting-assessment）
+### fnOS 移植（决策已定，2026-08-13 状态）
 
-- 🔄 **Tauri IPC 层**：意向替换为 axum HTTP + WebSocket（45 个 command 函数体复用，仅签名层改造）——**B1 已交付**：新增 `fnos-daemon/`（axum 服务，见 [b1-fnos-daemon.md](plans/b1-fnos-daemon.md)），`/api/invoke` 透传 32 个命令 + 13 个 NO_OP，`/ws/logs` 事件推送，SPA 静态托管
+**grill 决策 Q1-Q5**：
+| # | 决策 | 决议 |
+|---|------|------|
+| Q1 | 分批原则 | 按依赖纵向切片 + 契约先行（B1 定 API 契约后 B2/B3 可并行） |
+| Q2 | 代码组织 | **形态 C**：现有代码零改动（0 侵入）；新增 daemon crate + shim + patch，CI 组合构建 |
+| Q3 | invoke 契约 | **通用透传** `POST /api/invoke {cmd, args}`，命令面 = 现有 45 命令，不扩展 |
+| Q4 | UI 精简 | patch 删：开机自启设置/关闭到托盘/显示顶部栏/TitleBar/杀软警告/深链接提示；**保留**：隧道管理全流程、每隧道自动启动、进程守护、网络 4 开关、日志、更新、全部个性化、首页 |
+| Q5 | 网络形态 | **统一网关优先**（复用 NAS 登录态 + TLS 终结 + WS 支持）；daemon 只监听 127.0.0.1 |
+
+- 🔄 **Tauri IPC 层**：已替换为 axum HTTP + WebSocket（`fnos-daemon/`，`/api/invoke` 透传 + `/ws/logs` 事件 + SPA 静态托管）
 - 🔄 **托盘 / 深链接 / 单实例 / updater / 窗口控制**：fnOS 版移除（应用中心 + 服务模型代管）
-- 🔄 **自更新**：改为应用内更新 target 目录文件（.fpk 壳 + 下载替换，机制同桌面 updater）
-- ❌ **打包形态**：`.fpk`（fnpack）+ `cmd/main` 生命周期脚本 + iframe 桌面入口；`platform` 按 x86_64/arm64 双架构
-- ✅ **可复用**：`process` / `process_guard` / `process_persistence` / `custom_tunnel` / `download` / `http` / `ping` / `ports` 全部业务逻辑已移植到 daemon；前端 `api` 层已具备浏览器 fetch 降级路径（`"__TAURI__" in window` 检测）
+- ✅ **自更新**：应用内更新 target 目录文件（`/api/update/check|download|apply`，sha256 + 原子替换 + 重启；UPDATE_API_URL 可覆盖源）
+- ✅ **打包形态**：`.fpk`（fnpack）+ `cmd/main` 生命周期 + iframe 桌面入口；x86_64/aarch64 双架构
+- ✅ **可复用**：process / process_guard / process_persistence / custom_tunnel / download / http / ping / ports 全部移植到 daemon
+- ✅ **鉴权形态（真机实测 2026-08-13）**：平台不注入 TRIM_GATEWAY/DAEMON_TOKEN → 生产实际 None 模式；安全 = socket 0600 + 仅回环监听 + 网关独占
+
+### fnOS 前端双分支 patch 机制
+
+```
+main ──── 纯净上游 + patch 文件 + 构建链（apply-patches / build-fpk / gen-patch / CI）
+              ↑ PR（仅 patches/，CI 自动开）
+patcher ── main + src/ 侵入式 fnOS 改动（开发态）
+```
+
+- **基线 = 上游 develop**（v0.8.0 WIP）；main 的 src/ == upstream/develop（0 侵入不变式，patchgen CI 断言）
+- feature patch 11 文件（含守护默认开启修复：useAppInitialization + useProcessGuard）
+- 维护细节见 `docs/development.md` §patch 机制
 
 ### 现有技术债
 
