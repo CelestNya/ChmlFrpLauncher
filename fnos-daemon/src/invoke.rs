@@ -10,6 +10,7 @@
 //! 参数结构体统一 `#[serde(rename_all = "camelCase")]`（与 Tauri IPC 参数名一致）；
 //! 事件（frpc-log 等）经 /ws/logs 推送（C3 接入）。
 
+use crate::background;
 use crate::download;
 use crate::frpc::TunnelConfig;
 use crate::guard;
@@ -37,6 +38,33 @@ pub struct InvokeResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
+
+/// daemon 实际支持的命令集合（ADR-0001 能力协商）。
+/// 与 dispatch 的 match 分支保持同步：新增命令需登记，NO_OP 桌面专属命令不在内。
+pub const SUPPORTED_COMMANDS: &[&str] = &[
+    // frpc 进程
+    "start_frpc", "stop_frpc", "is_frpc_running", "get_running_tunnels",
+    "get_persisted_running_tunnels", "clear_log_history", "stop_orphan_process",
+    "is_tunnel_process_alive",
+    // 守护
+    "set_process_guard_enabled", "get_process_guard_enabled", "add_guarded_process",
+    "add_guarded_custom_tunnel", "remove_guarded_process", "check_log_and_stop_guard",
+    // 自定义隧道
+    "save_custom_tunnel", "get_custom_tunnels", "get_custom_tunnel_config",
+    "update_custom_tunnel", "delete_custom_tunnel", "start_custom_tunnel",
+    "stop_custom_tunnel", "is_custom_tunnel_running",
+    // frpc 下载
+    "download_frpc", "check_frpc_exists", "get_frpc_directory", "get_download_url",
+    // 网络/HTTP
+    "ping_host", "get_ports", "check_local_port", "resolve_domain_to_ip",
+    "http_request", "http_request_raw",
+    // 凭据与节点设置（阶段 1）
+    "save_credential", "get_credential", "clear_credential", "credential_status",
+    "get_node_settings", "set_node_settings",
+    // 壁纸文件（阶段 2）
+    "copy_background_image", "copy_background_video", "import_background_image_folder",
+    "get_background_video_path", "save_background_image",
+];
 
 impl InvokeResponse {
     fn ok(data: impl serde::Serialize) -> Self {
@@ -83,6 +111,15 @@ fn parse_args<T: DeserializeOwned>(args: Option<Value>) -> Result<T, String> {
 /// 命令分发表：C2 登记进程管理；后续批次陆续登记守护/下载/网络/自定义隧道。
 async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Value, String> {
     match cmd {
+        // ---- 能力协商（ADR-0001）：前端按能力面自适应，替代「假装支持」 ----
+        // 返回 daemon 实际支持的命令集合（不含 NO_OP 桌面专属命令）。
+        // 前端可据此决定 UI 入口与降级路径；桌面版 Tauri 无此端点（能力=全部）。
+        "capabilities" => {
+            Ok(json!({
+                "commands": SUPPORTED_COMMANDS,
+            }))
+        }
+
         // ---- frpc 进程管理（C2） ----
         "start_frpc" => {
             #[derive(Deserialize)]
@@ -379,7 +416,100 @@ async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Va
             Ok(json!(data))
         }
 
+        // ---- 凭据与节点设置（ADR-0002：shim 重定向的 daemon 侧权威存储） ----
+        "save_credential" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SaveCredentialArgs {
+                credential: crate::settings::Credential,
+            }
+            let args: SaveCredentialArgs = parse_args(args)?;
+            state.settings.save_credential(&args.credential)?;
+            Ok(json!(true))
+        }
+        "get_credential" => {
+            let data = state.settings.get_credential();
+            Ok(json!(data))
+        }
+        "clear_credential" => {
+            state.settings.clear_credential()?;
+            Ok(json!(true))
+        }
+        "credential_status" => {
+            let data = state.settings.credential_status();
+            Ok(json!(data))
+        }
+        "get_node_settings" => {
+            let data = state.settings.get_node_settings();
+            Ok(json!(data))
+        }
+        "set_node_settings" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SetNodeSettingsArgs {
+                settings: crate::settings::NodeSettings,
+            }
+            let args: SetNodeSettingsArgs = parse_args(args)?;
+            state.settings.save_node_settings(&args.settings)?;
+            Ok(json!(true))
+        }
+
+        // ---- 壁纸文件管理（ADR-0004：fnOS 从 base64 改文件路径 + daemon 托管） ----
+        "copy_background_image" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct BgArgs {
+                source_path: String,
+            }
+            let args: BgArgs = parse_args(args)?;
+            let data = background::copy_background_file(&state.cfg.data_dir, &args.source_path)?;
+            Ok(json!(data))
+        }
+        "copy_background_video" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct BgArgs {
+                source_path: String,
+            }
+            let args: BgArgs = parse_args(args)?;
+            let data = background::copy_background_file(&state.cfg.data_dir, &args.source_path)?;
+            Ok(json!(data))
+        }
+        // fnOS 浏览器上传：shim 把选图 dataURL 传上来，daemon 解 base64 落盘，
+        // 返回托管相对路径（/assets/backgrounds/ 静态路由映射）
+        "save_background_image" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SaveBgArgs {
+                data_url: String,
+                file_name: String,
+            }
+            let args: SaveBgArgs = parse_args(args)?;
+            let data = background::save_background_data_url(
+                &state.cfg.data_dir,
+                &args.data_url,
+                &args.file_name,
+            )?;
+            Ok(json!(data))
+        }
+        "import_background_image_folder" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct BgDirArgs {
+                dir_path: String,
+            }
+            let args: BgDirArgs = parse_args(args)?;
+            let data = background::import_background_image_folder(&state.cfg.data_dir, &args.dir_path)?;
+            Ok(json!(data))
+        }
+        "get_background_video_path" => {
+            let data = background::get_background_video_path(&state.cfg.data_dir)?;
+            Ok(json!(data))
+        }
+
         // ---- NO_OP：fnOS 版显式不可用（桌面专属能力，patch 删 UI 后前端不调用） ----
+        // 已实现（阶段 2a）：copy_background_video/image、import_background_image_folder、
+        // get_background_video_path 已从 NO_OP 移出。
         "fix_frpc_ini_tls"
         | "is_autostart_enabled"
         | "set_autostart"
@@ -388,11 +518,7 @@ async fn dispatch(state: &AppState, cmd: &str, args: Option<Value>) -> Result<Va
         | "hide_window"
         | "show_window"
         | "quit_app"
-        | "read_image_folder"
-        | "copy_background_video"
-        | "copy_background_image"
-        | "import_background_image_folder"
-        | "get_background_video_path" => {
+        | "read_image_folder" => {
             Err(format!("该功能在 fnOS 版不可用: {cmd}"))
         }
 
@@ -427,4 +553,48 @@ async fn check_log_with_emit(
     });
 
     Ok("已停止守护进程".to_string())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 能力面_包含阶段新命令() {
+        for cmd in [
+            "save_credential",
+            "get_credential",
+            "clear_credential",
+            "credential_status",
+            "get_node_settings",
+            "set_node_settings",
+            "copy_background_image",
+            "save_background_image",
+        ] {
+            assert!(
+                SUPPORTED_COMMANDS.contains(&cmd),
+                "能力面应包含 {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn 能力面_不含桌面专属NO_OP命令() {
+        for cmd in [
+            "hide_window",
+            "quit_app",
+            "is_autostart_enabled",
+            "set_autostart",
+            "fix_frpc_ini_tls",
+        ] {
+            assert!(
+                !SUPPORTED_COMMANDS.contains(&cmd),
+                "能力面不应包含桌面专属 {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn 能力面_不含capabilities自身() {
+        assert!(!SUPPORTED_COMMANDS.contains(&"capabilities"));
+    }
 }

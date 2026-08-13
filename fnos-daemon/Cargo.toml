@@ -28,6 +28,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tar = "0.4"
 flate2 = "1"
 socket2 = { version = "0.5", features = ["all"] }
+# 壁纸 dataURL 解码（ADR-0004：fnOS 浏览器上传图片 → base64 落盘）
+base64 = "0.22"
 # 测试用：tokio test-util（start_paused 虚拟时钟，守护状态机时序测试）
 [dev-dependencies]
 tokio = { version = "1.48", features = ["test-util"] }

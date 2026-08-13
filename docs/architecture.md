@@ -359,6 +359,26 @@ patcher ── main + src/ 侵入式 fnOS 改动（开发态）
 - feature patch 11 文件（含守护默认开启修复：useAppInitialization + useProcessGuard）
 - 维护细节见 `docs/development.md` §patch 机制
 
+### 前后端分离重构（2026-08-13，ADR-0001~0004）
+
+**范式**：契约收敛 + 能力协商；不回上游，**shim 重定向**承载数据后端化（业务代码零改动）。
+
+```
+前端业务代码（api.ts/frpcManager，零改动）
+    │ localStorage 白名单 key（chmlfrp_user/proxy/logLevel/bypassProxy/restartOnEdit）
+    ▼
+shim 拦截（fnOS 构建注入，先于 bundle 执行）
+    │ 转发
+    ▼
+daemon credential.json / node_settings.json（0600）
+```
+
+- **能力协商**：`GET /api/capabilities` + `invoke.rs::SUPPORTED_COMMANDS`；NO_OP 桌面专属命令明确「不支持」（原 13 个减至 8 个，背景 4 命令已恢复实现）
+- **凭据/配置后端化**：`fnos-daemon/src/settings.rs`（credential + node_settings，0600）
+- **壁纸文件化**：`fnos-daemon/src/background.rs` + `/assets/backgrounds/` 静态托管；fnOS 砍轮播（ADR-0004）
+- **首帧 boot**：daemon `serve_index_with_boot` 注入 `__FNOS_BOOT__`（credential+nodeSettings），shim 同步读防闪烁
+- **渲染类偏好留守 localStorage**（ADR-0003：首帧同步读约束）；行为类 4 项后端化
+
 ### 现有技术债
 
 - `api.ts` 的 Tauri invoke 分支与浏览器 fetch 降级并存，两路径行为需保持一致（offline_tunnel 的响应处理有差异）

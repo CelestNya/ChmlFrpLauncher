@@ -56,6 +56,23 @@ fnos-pack/patches/
 
 **⚠️ 新增 src/ 改动文件必须登记**：gen-patch.sh 的 `UI_FILES` / `FEATURE_FILES` 数组。漏登记 = patch 未生成 = 修复不进产物（useTunnelProgress 事故教训，gen-patch E6 完整性自检会拦截）。
 
+### 前后端分离重构（2026-08-13，ADR-0001~0004）
+
+**范式**：契约收敛 + 能力协商。不回上游，**shim 重定向**承载数据后端化——业务代码（api.ts/frpcManager）零改动。
+
+| 机制 | 位置 | 说明 |
+|------|------|------|
+| localStorage 白名单拦截 | `fnos-shim/tauri-shim.ts` | `chmlfrp_user`/`frpc_proxy_config`/`frpcLogLevel`/`bypassProxy`/`restartOnEdit` 重定向 daemon，不落真 localStorage |
+| 首帧 boot 注入 | `fnos-daemon/src/main.rs` `serve_index_with_boot` | index.html 注入 `__FNOS_BOOT__`（credential+nodeSettings），shim 同步读防闪烁 |
+| 凭据/节点设置存储 | `fnos-daemon/src/settings.rs` | `credential.json`/`node_settings.json`（0600），命令 save/get/clear/status |
+| 壁纸文件化 | `fnos-daemon/src/background.rs` | fnOS 选图 dataURL → daemon 解 base64 落盘 → 托管 `/assets/backgrounds/`；砍轮播 |
+| 能力协商 | `GET /api/capabilities` + `invoke.rs::SUPPORTED_COMMANDS` | 前端可探测 daemon 命令面；NO_OP 桌面专属命令明确「不支持」 |
+
+**关键约束**：
+- 新增白名单 key 需同步 shim `WHITELIST` + daemon `NodeSettings`/`Credential` 结构体
+- 登出顺序（ADR-0002）：先停隧道清 g_*.ini → 再 clear_credential（前端 logout.ts 已保证）
+- 渲染类偏好（theme/背景/模糊）**留守 localStorage**（ADR-0003，首帧同步读约束）
+
 验证：
 - `apply-patches.sh` 内置两段验证（失败即 exit 1）：UI 精简（无 TitleBar/AntivirusWarningDialog）、feature（useBackgroundImage 含 __FNOS__、useTunnelNotifications 含 replay）
 - `gen-patch.sh` 内置自检：两个 patch 可从基线干净应用
@@ -124,8 +141,8 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 
 | 层 | 命令 | 数量 |
 |----|------|------|
-| daemon (Rust) | `cd fnos-daemon && cargo test` | 48（WSL 含 unix 专属 52） |
-| 前端 (vitest) | `pnpm exec vitest run` | 28（shim 15 + src 13） |
+| daemon (Rust) | `cd fnos-daemon && cargo test` | 66（含 settings/background/capabilities 新测试） |
+| 前端 (vitest) | `pnpm exec vitest run` | 45（shim 27 + src 18） |
 | 构建链 (bash) | `bash fnos-pack/tests/lib.test.sh` | 9 断言 |
 | 类型/风格 | `pnpm exec tsc --noEmit` / `pnpm exec eslint` | — |
 

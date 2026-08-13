@@ -5,6 +5,7 @@
 //! 零 tauri / WebKit 依赖，默认仅监听回环地址（统一网关在 fnOS 侧转发）。
 
 mod auth;
+mod background;
 mod config;
 mod custom;
 mod download;
@@ -15,6 +16,7 @@ mod invoke;
 mod net;
 mod persist;
 mod proxy;
+mod settings;
 mod update;
 mod ws;
 
@@ -31,6 +33,7 @@ use guard::GuardState;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use serde_json::json;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
@@ -40,6 +43,8 @@ pub struct AppState {
     pub frpc: Arc<FrpcManager>,
     pub custom: Arc<CustomManager>,
     pub guard: Arc<GuardState>,
+    /// 凭据与节点设置的后端存储（ADR-0002：token/代理配置离浏览器）
+    pub settings: Arc<settings::SettingsStore>,
     pub events: broadcast::Sender<Event>,
     /// frpc 日志环形缓冲（WS 断线重连补发）
     pub log_history: LogHistory,
@@ -50,12 +55,48 @@ pub struct AppState {
 
 /// SPA fallback：真实文件直接返回，其余（含根路径 /）回退 index.html。
 /// （nest 前缀下 ServeDir 的 not_found_service 与显式 / 路由均不可靠，统一走 fallback）
+/// fnOS 专属：index.html 注入 `__FNOS_BOOT__`（credential + nodeSettings，阶段 1c）——
+/// shim 启动时同步读入内存缓存，业务代码首帧 getItem(chmlfrp_user) 命中缓存，不闪烁。
 async fn spa_fallback(
     State(state): State<AppState>,
     req: Request,
 ) -> Response {
     let path = req.uri().path().trim_start_matches('/');
+    // 索引页（/ 或 /index.html）注入 boot blob
+    if path.is_empty() || path.ends_with("index.html") {
+        if let Some(html) = serve_index_with_boot(&state).await {
+            return html;
+        }
+    }
     serve_static(&state.cfg.web_dir, path).await
+}
+
+/// 读取 index.html 并在 `<head>` 注入 `__FNOS_BOOT__`（含 daemon 侧凭据/节点设置）。
+/// 返回 None 表示 index.html 不存在（回退 serve_static 的正常处理）。
+async fn serve_index_with_boot(state: &AppState) -> Option<Response> {
+    let index = state.cfg.web_dir.join("index.html");
+    let content = tokio::fs::read_to_string(&index).await.ok()?;
+    let boot_json = json!({
+        "credential": state.settings.get_credential(),
+        "nodeSettings": state.settings.get_node_settings(),
+    })
+    .to_string();
+    let script = format!(
+        "<script>window.__FNOS_BOOT__ = {boot_json};</script>"
+    );
+    // 注入到 <head> 开头（shim 是 body 末尾普通脚本，先于它执行；React 挂载前就绪）
+    let injected = if content.contains("</head>") {
+        content.replace("</head>", format!("{script}</head>").as_str())
+    } else {
+        format!("{script}{content}")
+    };
+    Some(
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+            .body(Body::from(injected))
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+    )
 }
 
 /// 校验并规范化静态资源请求路径（第一层防御：语法拒绝）。
@@ -257,6 +298,7 @@ async fn main() {
         guard.clone(),
     ));
     let custom = Arc::new(CustomManager::new(frpc.clone()));
+    let settings = Arc::new(settings::SettingsStore::new(&cfg.data_dir));
 
     // 恢复仍在运行的隧道进程（仅记录与日志，守护接管见 guard.rs）
     let recovered = frpc.persistence.recover_running_tunnels();
@@ -280,6 +322,7 @@ async fn main() {
         frpc,
         custom,
         guard,
+        settings,
         events: event_tx,
         log_history,
         update: update::UpdateChecker::default(),
@@ -289,11 +332,27 @@ async fn main() {
 
     let inner_app = Router::new()
         .route("/api/bootstrap", get(invoke::bootstrap))
+        // ADR-0001：能力协商端点——前端据此判断 daemon 支持哪些命令
+        .route(
+            "/api/capabilities",
+            get(|| async {
+                axum::Json(serde_json::json!({
+                    "commands": invoke::SUPPORTED_COMMANDS,
+                }))
+            }),
+        )
         .route("/api/invoke", post(invoke::handle_invoke))
         .route("/ws/logs", get(ws::ws_logs))
         .route("/api/update/check", get(update::handle_check))
         .route("/api/update/download", post(update::handle_download))
         .route("/api/update/apply", post(update::handle_apply))
+        // ADR-0004：壁纸文件经 daemon 静态托管（data_dir/backgrounds，只读）——
+        // fnOS 前端用相对 URL 渲染壁纸，替代桌面 app:// 协议
+        .nest_service(
+            "/assets/backgrounds",
+            tower_http::services::ServeDir::new(cfg.data_dir.join("backgrounds"))
+                .precompressed_gzip(),
+        )
         .fallback(spa_fallback)
         .layer(axum::middleware::from_fn(auth::require_auth))
         .with_state(state);
@@ -465,5 +524,78 @@ mod tests {
 
         drop(listener);
         let _ = fs::remove_file(&sock_path);
+    }
+
+    /// index.html 注入 __FNOS_BOOT__：首帧同步读 credential/nodeSettings（阶段 1c）。
+    /// daemon 托管 SPA 时业务代码 getItem(chmlfrp_user) 命中 boot 注水缓存，不闪烁。
+    #[tokio::test]
+    async fn index注入boot_blob() {
+        use crate::settings::{Credential, SettingsStore};
+        use axum::body::to_bytes;
+
+        let dir = std::env::temp_dir().join(format!("fnos-boot-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("index.html"), "<html><head></head><body></body></html>").unwrap();
+
+        let store = SettingsStore::new(&dir);
+        store
+            .save_credential(&Credential {
+                username: Some("u".to_string()),
+                usertoken: None,
+                access_token: Some("access".to_string()),
+                refresh_token: Some("refresh".to_string()),
+                access_token_expires_at: Some(1750000000),
+                token_type: Some("Bearer".to_string()),
+            })
+            .unwrap();
+
+        let state = AppState {
+            cfg: Arc::new(config::DaemonConfig {
+                data_dir: dir.clone(),
+                web_dir: dir.clone(),
+                app_dest: None,
+                listen_addr: "127.0.0.1:17890".parse().unwrap(),
+            }),
+            settings: Arc::new(store),
+            frpc: Arc::new(crate::frpc::FrpcManager::new(
+                dir.clone(),
+                tokio::sync::broadcast::channel(8).0,
+                Arc::new(std::sync::Mutex::new(VecDeque::new())),
+                GuardState::new(),
+            )),
+            custom: Arc::new(CustomManager::new(Arc::new(
+                crate::frpc::FrpcManager::new(
+                    dir.clone(),
+                    tokio::sync::broadcast::channel(8).0,
+                    Arc::new(std::sync::Mutex::new(VecDeque::new())),
+                    GuardState::new(),
+                ),
+            ))),
+            guard: GuardState::new(),
+            events: tokio::sync::broadcast::channel(8).0,
+            log_history: Arc::new(std::sync::Mutex::new(VecDeque::new())),
+            update: update::UpdateChecker::default(),
+            shutdown: tokio::sync::broadcast::channel(1).0,
+        };
+
+        let req = axum::http::Request::builder()
+            .uri("/index.html")
+            .body(Body::empty())
+            .unwrap();
+        let resp = spa_fallback(State(state), req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8(bytes.to_vec()).unwrap();
+
+        assert!(html.contains("__FNOS_BOOT__"), "缺少 __FNOS_BOOT__ 注入");
+        assert!(
+            html.contains("\"access_token\":\"access\""),
+            "boot 应含凭据 access_token"
+        );
+        assert!(
+            !html.contains("\"accessToken\":\"access\""),
+            "boot 应保持 daemon snake_case（shim 负责转 camelCase）"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

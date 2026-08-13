@@ -56,113 +56,33 @@ index a3ae360..af3c1fa 100644
  
    const handleSaveLogs = async () => {
 diff --git a/src/components/pages/Settings/hooks/useBackgroundImage.ts b/src/components/pages/Settings/hooks/useBackgroundImage.ts
-index 8a74b16..0da79f5 100644
+index 8a74b16..7a8096b 100644
 --- a/src/components/pages/Settings/hooks/useBackgroundImage.ts
 +++ b/src/components/pages/Settings/hooks/useBackgroundImage.ts
-@@ -11,6 +11,67 @@ import {
- 
- const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
- 
-+/** fnOS：用 webkitdirectory 选文件夹，返回图片 dataURL 列表。
-+ *  浏览器无真实目录路径，图片以 dataURL 存 localStorage（容量受限）。
-+ *  返回 null = 用户取消；[] = 无可用图片；string[] = 图片 dataURL 列表。 */
-+function pickFolderImagesBrowser(): Promise<string[] | null> {
-+  return new Promise((resolve) => {
-+    const input = document.createElement("input");
-+    input.type = "file";
-+    input.setAttribute("webkitdirectory", "");
-+    input.setAttribute("directory", "");
-+    let settled = false;
-+    const finish = (value: string[] | null) => {
-+      if (settled) return;
-+      settled = true;
-+      resolve(value);
-+    };
-+    input.onchange = () => {
-+      const files = input.files ? Array.from(input.files) : [];
-+      const images = files
-+        .filter((f) => f.type.startsWith("image/"))
-+        .sort((a, b) => a.name.localeCompare(b.name));
-+      if (images.length === 0) {
-+        finish([]);
-+        return;
-+      }
-+      const MAX_COUNT = 20;
-+      const MAX_TOTAL = 4 * 1024 * 1024; // localStorage 总量保护（dataURL 已含 base64 膨胀）
-+      const results: string[] = [];
-+      let total = 0;
-+      let idx = 0;
-+      const readNext = () => {
-+        if (idx >= images.length || results.length >= MAX_COUNT) {
-+          finish(results);
-+          return;
-+        }
-+        const file = images[idx++];
-+        if (file.size > 2 * 1024 * 1024) {
-+          readNext(); // 单张超限跳过
-+          return;
-+        }
-+        const reader = new FileReader();
-+        reader.onload = () => {
-+          const dataUrl = reader.result as string;
-+          total += dataUrl.length;
-+          if (total > MAX_TOTAL) {
-+            finish(results);
-+            return;
-+          }
-+          results.push(dataUrl);
-+          readNext();
-+        };
-+        reader.onerror = () => readNext();
-+        reader.readAsDataURL(file);
-+      };
-+      readNext();
-+    };
-+    // 取消（Esc/关闭文件框）：cancel 事件；勿用 focus 兜底（先于 change 触发会误杀正常选择）
-+    input.addEventListener("cancel", () => finish(null));
-+    input.click();
-+  });
-+}
-+
- export function useBackgroundImage() {
-   const [backgroundImage, setBackgroundImage] = useState<string | null>(() =>
-     getInitialBackgroundImage(),
-@@ -64,6 +125,29 @@ export function useBackgroundImage() {
+@@ -64,6 +64,16 @@ export function useBackgroundImage() {
    }, [intervalTime]);
  
    const handleSelectFolder = async () => {
-+    // fnOS 浏览器环境：无真实目录路径，用 webkitdirectory 读 dataURL 列表
++    // fnOS（ADR-0004）：砍轮播——文件夹导入（webkitdirectory 多图 base64 塞
++    // localStorage）是配额压力源。fnOS 只支持单图（handleSelectBackgroundImage）。
 +    const isFnOS =
 +      typeof window !== "undefined" &&
 +      Boolean((window as unknown as { __FNOS__?: boolean }).__FNOS__);
 +    if (isFnOS) {
-+      try {
-+        const files = await pickFolderImagesBrowser();
-+        if (files === null) return; // 用户取消，静默
-+        if (files.length === 0) {
-+          toast.error("文件夹内没有发现可用图片");
-+          return;
-+        }
-+        setPlaylist(files);
-+        setCurrentIndex(0);
-+        setBackgroundImage(files[0]);
-+        setIntervalTime(5000);
-+        toast.success(`成功导入 ${files.length} 张图片并开启轮播`);
-+      } catch {
-+        toast.error("读取文件夹失败");
-+      }
++      toast.info("fnOS 版暂不支持文件夹轮播，请选择单张图片");
 +      return;
 +    }
 +
      try {
        const selected = await open({
          directory: true,
-@@ -114,6 +198,19 @@ export function useBackgroundImage() {
+@@ -114,6 +124,20 @@ export function useBackgroundImage() {
          setIntervalTime(0);
          setCurrentIndex(0);
  
-+        // fnOS 浏览器环境：shim 的 dialog.open 已返回 dataURL（选图后本地读取），
-+        // 无需 daemon 拷贝；getBackgroundType 原生识别 data:image/ 前缀，直接使用。
++        // fnOS（ADR-0004）：shim 的 dialog.open 已把选图上传 daemon
++        // （save_background_image），返回 /assets/backgrounds/<file> 托管 URL；
++        // getBackgroundType 识别非 data:/app:// 前缀直接当 src 渲染。
 +        const isFnOS =
 +          typeof window !== "undefined" &&
 +          Boolean(

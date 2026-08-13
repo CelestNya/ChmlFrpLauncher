@@ -9,25 +9,26 @@
 
 ## 当前状态（一句话）
 
-**NAS 测试阶段全部完成**：v0.8.0 真机部署并验证全部功能；三个实测问题（守护默认关闭、市场升级不换 dist、install-local 危险）已修复/归档。**等用户决策发版节奏**（倾向跟随上游 release，暂不发）。
+**前后端分离重构已完成（阶段 0-5）**：token/代理配置经 shim 重定向离浏览器 localStorage 落 daemon 文件（0600），壁纸 fnOS 砍轮播 + 文件化，能力协商替代 NO_OP。全量回归绿（daemon 66 / vitest 45 / tsc / eslint / patch 可应用）。等真机部署验证。
 
 ## 待决策事项
 
-1. **发版策略**：上游 Latest = v0.7.5（2026-05-20），v0.8.0 仅 develop WIP（13 提交，最新 8-12 升级依赖）。倾向跟随上游，NAS 0.8.0 仅内部测试版。
-2. **上游 PR**：六批修复 PR 回上游 develop（基线），但桌面回归门控（`__FNOS__`）是硬门槛。待用户确认。
-3. **遗留项**：见 `docs/development.md` §七（自更新通道、daemon 自保、OAuth CORS、UI 适配、WS seq、IndexedDB）。
+1. **真机验证**：重构后需部署 NAS 验证（credential 落 daemon、代理后端化、壁纸托管 URL、能力探测）。
+2. **发版策略**：上游 Latest = v0.7.5（2026-05-20），v0.8.0 仅 develop WIP。倾向跟随上游，NAS 0.8.0 仅内部测试版。
+3. **遗留项**：见 `docs/development.md` §七（自更新通道、daemon 自保、OAuth CORS、UI 适配、WS seq）。
 
 ## 已完成里程碑（2026-08-13）
 
 | 里程碑 | 证据 |
 |--------|------|
 | 基线切上游 develop (v0.8.0 WIP) | main src/ == upstream/develop（0 侵入） |
-| 六批 TDD 修复 (A-F) | daemon 48 / vitest 28 / lib.sh 9 全绿 |
+| 六批 TDD 修复 (A-F) | daemon 66 / vitest 45 / lib.sh 9 全绿 |
 | CI 修复（pnpm 11 / Node 22） | 双架构构建 success |
 | 版本号同步 0.8.0 | manifest / Cargo.toml / package.json / Cargo.lock |
 | NAS 部署 + 人工测试 | `docs/plans/fnos-nas-test-checklist.md` |
 | 守护默认开启修复 | patcher 0ddb15e + PR #13 |
 | 市场升级 dist 权限修复 | patcher 34bc1d9（build-fpk.sh chmod go-w） |
+| **前后端分离重构（阶段 0-5）** | CONTEXT.md + docs/adr/0001-0004；shim 重定向 + daemon 存储 + 壁纸文件化 + capabilities |
 
 ## 最近提交（patcher）
 

@@ -102,7 +102,7 @@ index 16f2a5b..13d34f3 100644
              isOpen={showCloseConfirmDialog}
              onClose={() => setShowCloseConfirmDialog(false)}
 diff --git a/src/components/pages/Settings/components/AppearanceSection.tsx b/src/components/pages/Settings/components/AppearanceSection.tsx
-index 69b973d..b85c6af 100644
+index 69b973d..12588e2 100644
 --- a/src/components/pages/Settings/components/AppearanceSection.tsx
 +++ b/src/components/pages/Settings/components/AppearanceSection.tsx
 @@ -16,15 +16,11 @@ import { getBackgroundType } from "../utils";
@@ -138,7 +138,18 @@ index 69b973d..b85c6af 100644
                                      backgroundImage,
                                      isSelectingImage,
                                      overlayOpacity,
-@@ -223,40 +215,6 @@ export function AppearanceSection({isMacOS,
+@@ -81,6 +73,10 @@ export function AppearanceSection({isMacOS,
+                                   }: AppearanceSectionProps) {
+   const backgroundType = getBackgroundType(backgroundImage);
+   const isVideo = backgroundType === "video";
++  // fnOS（ADR-0004）：砍轮播，隐藏文件夹导入入口
++  const isFnOS =
++    typeof window !== "undefined" &&
++    Boolean((window as unknown as { __FNOS__?: boolean }).__FNOS__);
+ 
+   const toggleTheme = async (newTheme: ThemeMode, event?: React.MouseEvent) => {
+     if (!document.startViewTransition) {
+@@ -223,40 +219,6 @@ export function AppearanceSection({isMacOS,
              </ItemActions>
            </Item>
  
@@ -179,6 +190,29 @@ index 69b973d..b85c6af 100644
            <ItemSeparator />
  
            <Item variant="outline" className="border-0">
+@@ -283,15 +245,18 @@ export function AppearanceSection({isMacOS,
+                       >
+                         选择文件
+                       </Button>
+-                      <Button
++                      {/* fnOS（ADR-0004）：砍轮播，隐藏文件夹导入入口 */}
++                      {!isFnOS && (
++                        <Button
+                           onClick={onSelectFolder}
+                           disabled={isSelectingImage}
+                           size="sm"
+                           variant="outline"
+                           className="h-auto px-3 py-1.5 text-xs"
+-                      >
+-                        选择文件夹
+-                      </Button>
++                        >
++                          选择文件夹
++                        </Button>
++                      )}
+                     </>
+                 ) : (
+                     <Button
 diff --git a/src/components/pages/Settings/components/SystemSection.tsx b/src/components/pages/Settings/components/SystemSection.tsx
 index ca14adb..e319e30 100644
 --- a/src/components/pages/Settings/components/SystemSection.tsx
