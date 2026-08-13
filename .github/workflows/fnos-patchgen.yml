@@ -5,8 +5,8 @@ name: fnOS Patch Generator
 # 触发：push 到 patcher 分支（或手动 dispatch）。
 # 流程：
 #   1. checkout patcher（fetch-depth 0 获取全历史）
-#   2. 同步上游最新 main 到 origin/main 引用（作为 patch 生成基线）
-#   3. 跑 fnos-pack/gen-patch.sh 生成两个 patch（diff 上游基线）
+#   2. 同步上游最新 develop 作为 patch 生成基线（fork main 的 src/ 与其一致）
+#   3. 跑 fnos-pack/gen-patch.sh 生成两个 patch（diff 上游 develop 基线）
 #   4. 基于 origin/main 建临时分支，只提交 patches/ + gen-patch.sh（不含 src/）
 #   5. push 临时分支 → 开 PR：临时分支 → main（人工 review 后合并）
 #
@@ -35,17 +35,17 @@ jobs:
           ref: patcher
           fetch-depth: 0
 
-      - name: Sync upstream main baseline
+      - name: Sync upstream develop baseline
         run: |
           git remote add upstream https://github.com/TechCat-Team/ChmlFrpLauncher.git
-          git fetch upstream main
-          # 覆盖 origin/main 引用为上游最新（gen-patch.sh 默认用 origin/main 作基线）
-          git update-ref refs/remotes/origin/main refs/remotes/upstream/main
-          echo "上游基线: $(git rev-parse --short origin/main)"
+          git fetch upstream develop
+          git fetch origin main
+          echo "上游 develop 基线: $(git rev-parse --short upstream/develop)"
+          echo "fork main 基线:    $(git rev-parse --short origin/main)"
 
       - name: Generate patches
         run: |
-          bash fnos-pack/gen-patch.sh
+          BASE=upstream/develop bash fnos-pack/gen-patch.sh
           echo "=== patch 变更 ==="
           git status --short fnos-pack/patches/
 
@@ -95,6 +95,6 @@ jobs:
             -f "title=chore(fnos): 更新 fnOS patch（自动生成）" \
             -f "head=$BRANCH" \
             -f "base=main" \
-            -f "body=由 patcher 分支自动生成的 fnOS 前端 patch 更新。来源: patcher@$(git rev-parse --short patcher)，基线: 上游 main@$(git rev-parse --short origin/main)。仅改动 fnos-pack/patches/（+ gen-patch.sh），不涉及 src/。请 review 后合并。" \
+            -f "body=由 patcher 分支自动生成的 fnOS 前端 patch 更新。来源: patcher@$(git rev-parse --short patcher)，基线: 上游 develop@$(git rev-parse --short upstream/develop)。仅改动 fnos-pack/patches/（+ gen-patch.sh），不涉及 src/。请 review 后合并。" \
             --jq '.html_url')
           echo "✅ 已创建 PR: $PR_URL"
