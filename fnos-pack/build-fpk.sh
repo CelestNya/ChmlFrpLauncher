@@ -149,6 +149,13 @@ mkdir -p "$PKG_DIR/app/ui/images" "$PKG_DIR/cmd" "$PKG_DIR/config" "$PKG_DIR/wiz
 cp "$DAEMON_BIN" "$PKG_DIR/app/chmlfrp-daemon"
 cp -r "$REPO_ROOT/dist-fnos" "$PKG_DIR/app/dist"
 
+# fnOS 市场升级（install-fpk）会保留「777 可写目录」不覆盖（视为应用可写数据），
+# 导致 dist/ 在升级时不被替换（前端停留旧版，daemon 与前端版本错配）。
+# vite 产物目录默认 755 但 CI/拷贝可能带 group/other 写位——显式收紧：
+# 目录/文件去掉 group+other 写位（775→755、664/666→644），保留原有 owner 写位与执行位。
+find "$PKG_DIR/app/dist" -type d -exec chmod go-w {} \;
+find "$PKG_DIR/app/dist" -type f -exec chmod go-w {} \;
+
 # 模板文件
 cp "$PKG_TEMPLATE/manifest" "$PKG_DIR/manifest"
 cp "$PKG_TEMPLATE/app/ui/config" "$PKG_DIR/app/ui/config"
