@@ -5,13 +5,18 @@
 //! 本模块预留两种模式：
 //! - Gateway：校验网关转发的用户身份 Header（B3 接入统一网关后启用）
 //! - Token：`X-Auth-Token` 校验（开发/局域网调试用，默认关闭）
+//!
+//! ⚠️ 真机实测（2026-08-13，PID 69661）：fnOS 应用商店部署时**不注入**
+//! TRIM_GATEWAY / DAEMON_TOKEN 环境变量 → 生产实际运行在 None 模式。
+//! 当前安全模型 = socket 0600（bind_gateway_socket）+ 仅回环监听 + 网关独占访问；
+//! Gateway 模式是未启用的预留路径，接入统一网关前不要依赖它。
 
 use axum::extract::Request;
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::Response;
 
-/// 网关转发用户身份的标准 Header 名（fnOS 网关约定，B3 实测确认）。
+/// 网关转发用户身份的标准 Header 名（fnOS 网关约定；真机实测未注入，见模块注释）。
 const GATEWAY_USER_HEADER: &str = "x-trim-user";
 /// Token 模式校验头。
 const TOKEN_HEADER: &str = "x-auth-token";
@@ -22,7 +27,7 @@ pub enum AuthMode {
     None,
     /// 校验固定 token（从环境变量 DAEMON_TOKEN 读取）
     Token,
-    /// 校验网关用户 Header（fnOS 统一网关，B3 启用）
+    /// 校验网关用户 Header（fnOS 统一网关；预留路径，真机未注入 TRIM_GATEWAY）
     Gateway,
 }
 

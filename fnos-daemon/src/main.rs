@@ -225,6 +225,7 @@ async fn main() {
 
     // 鉴权模式声明（daemon 高-2）：None 模式仅限回环 + socket 0600 的可信环境，
     // 显式警告避免静默裸奔。
+    // 真机实测（2026-08-13）：商店部署不注入 TRIM_GATEWAY/DAEMON_TOKEN，None 是生产实际模式。
     match auth::load_mode() {
         auth::AuthMode::None => warn!(
             "鉴权模式: None（无鉴权）。仅限回环监听 + 网关 socket 0600 的可信环境；\
