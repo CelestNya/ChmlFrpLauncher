@@ -1,5 +1,41 @@
 # fnOS 移植代码审查报告（2026-08-13）
 
+## 修复状态（2026-08-13 TDD 六批全部落地）
+
+> 计划驱动 TDD 修复完成：批 0 测试基建 → 批 A 安全 → 批 B 真机功能 → 批 D CI →
+> 批 E 构建链 → 批 F 测试补全。daemon 测试 4 → 48（WSL 含 unix 专属），
+> 前端 vitest 28（shim 15 + src 13），lib.sh 单测 9 断言。
+> 提交见 patcher：f735d09（A）/ ee779bf（B）/ 725fd2b（D）/ c704eb0（E）/ 2f14426（F）。
+
+| 编号 | 状态 | 编号 | 状态 |
+|---|---|---|---|
+| daemon 高-1 路径穿越 | ✅ A1 | daemon 高-2 socket/鉴权 | ⚠️ A2/A3 已修代码；**真机网关注入实测待做**（用户配合） |
+| daemon 高-3 start 竞态 | ✅ A5 | daemon 中-1 守护 TOCTOU | ✅ A9 |
+| daemon 中-2 失败退避 | ✅ A9 | daemon 中-3 Lagged | ✅ A9 |
+| daemon 中-4 PID 复用 | ✅ A10 | daemon 中-5 持锁 wait | ✅ A6 |
+| daemon 中-6 自更新原子 | ✅ A11 | daemon 中-7 token 脱敏 | ✅ A4 |
+| daemon 中-8 恢复守护 | ✅ A8 | daemon 中-10 SSRF | ✅ A7 |
+| daemon 中-11 WS 双发窗口 | ⏳ 遗留（前端 B7 已兜底去重，daemon 侧 seq 方案未做） | daemon 中-12 一致性缺口 | ✅ A9（重注册/emit_log/删除移除守护） |
+| shim H1 导出日志 | ✅ B1 | shim H2 首连丢帧 | ✅ B2 |
+| shim H3 dialog 形态 | ✅ B3 | shim M1 updater 进度 | ✅ B6（链路转发；前端 UI 未改） |
+| shim M2 dialog filters | ✅ B3 | shim M3 invoke 超时 | ✅ B4 |
+| shim M4 unlisten 泄漏 | ✅ B5 | shim M5 Windows esbuild | ⏳ 遗留（注释与实现不符，实际走 wrapper 可用；影响低） |
+| 前端 H1 去重窗口 | ✅ B7 | 前端 M1/M2 桌面回归 | ✅ B8 |
+| 前端 M3 配额溢出 | ⏳ 遗留（建议 IndexedDB 方案未做） | 前端 M4 clearLogs | ✅ B9 |
+| 前端 M5 进度恢复 | ✅ B10 | 前端 M6 首屏延迟 | ⚠️ 部分（startListening 判定为误判；首连丢帧归 B2） |
+| pack H1 rm -rf 边界 | ✅ E1 | pack H2 gen-patch 盲区 | ✅ E6 |
+| pack H3 图标仅警告 | ✅ E7 | pack M1 `\|\| true` | ✅ E2 |
+| pack M3 Pillow | ✅ E3 | pack M4 start 假成功 | ✅ E5 |
+| pack M5 版本漂移 | ✅ E4（本地/构建期校验；CI tag 校验随 release 暂缓） | CI 高-1/高-2 release | ⏳ 用户决策暂缓（无 release 需求） |
+| CI 中-1 并发 | ✅ D1 | CI 中-2 基线断言 | ✅ D3 |
+| CI 中-3 body 刷新 | ✅ D2 | CI 中-4/5/6 | ✅ D6/⏳单架构 attach 未拆（无 release 需求） |
+
+**遗留清单（明确不做/待后续）**：daemon 中-11 seq 方案、shim M5、前端 M3（IndexedDB）、
+CI 单架构独立 attach、release 兜底与 tag 版本 CI 校验（用户决策暂缓）、daemon 自保、
+OAuth CORS、UI 适配、真机网关注入实测（需用户配合只读查询 /proc/<pid>/environ）。
+
+---
+
 > 审查基线：upstream/develop@722d8ef。范围：相对上游的 51 文件 / 8897 行增量
 > （fnos-daemon 14 文件、fnos-shim 2 文件、fnos-pack 3 脚本 + fpk 模板、CI 2 个 workflow、
 > 前端 10 文件侵入改动）。六角度：功能正确性 / 异常处理 / 边界条件 / 空值处理 / 并发风险 / 性能隐患。
