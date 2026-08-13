@@ -464,7 +464,32 @@ pub(crate) fn spawn_log_reader(
 }
 
 /// 生成 frpc 配置文件（照桌面版 generate_frpc_config）。
+/// ini 值合法性：拒绝换行/NUL 等控制字符——前端传入的 server_addr/token 若含
+/// 换行可注入 ini 行（daemon 低-配置注入面修复）。
+fn valid_ini_value(v: &str) -> bool {
+    !v.chars().any(|c| c == '\n' || c == '\r' || c == '\0')
+}
+
 fn generate_frpc_config(config: &TunnelConfig) -> Result<String, String> {
+    // 关键字段字符集校验（防 ini 行注入）
+    for (field, value) in [
+        ("server_addr", config.server_addr.as_str()),
+        ("user_token", config.user_token.as_str()),
+        ("node_token", config.node_token.as_str()),
+        ("tunnel_name", config.tunnel_name.as_str()),
+        ("local_ip", config.local_ip.as_str()),
+        ("log_level", config.log_level.as_str()),
+    ] {
+        if !valid_ini_value(value) {
+            return Err(format!("{field} 包含非法字符"));
+        }
+    }
+    if let Some(ref proxy) = config.http_proxy {
+        if !valid_ini_value(proxy) {
+            return Err("http_proxy 包含非法字符".to_string());
+        }
+    }
+
     let mut content = String::new();
 
     writeln!(content, "[common]").unwrap();
@@ -644,6 +669,25 @@ mod tests {
         // "token"（5 字符）是常见词，掩码会误伤正常日志——只掩码 ≥6 的分段
         let out = sanitize_log("the token field", &[USER_TOKEN]);
         assert!(out.contains("token"), "短分片不应被掩码: {out}");
+    }
+
+    // ---- ini 注入防护（daemon 低-配置注入面） ----
+
+    #[test]
+    fn ini值校验_拒绝控制字符() {
+        assert!(valid_ini_value("1.2.3.4"));
+        assert!(valid_ini_value(""));
+        assert!(!valid_ini_value("1.2.3.4\nproxy=evil"), "换行可注入 ini 行");
+        assert!(!valid_ini_value("a\rb"));
+        assert!(!valid_ini_value("a\0b"));
+    }
+
+    #[test]
+    fn 配置生成拒绝注入的server_addr() {
+        let mut config = test_config();
+        config.server_addr = "x\ninjected = 1".to_string();
+        let err = generate_frpc_config(&config).unwrap_err();
+        assert!(err.contains("非法字符"), "err: {err}");
     }
 
     // —— A5/A6：进程表占位状态 + 锁外 kill/回收 ——

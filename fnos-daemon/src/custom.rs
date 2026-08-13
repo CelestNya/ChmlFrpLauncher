@@ -182,6 +182,11 @@ impl CustomManager {
         tunnel_id: String,
         config_content: String,
     ) -> Result<CustomTunnel, String> {
+        // daemon 低-自定义隧道 id 未校验：含 / 等字符会产生怪异文件名
+        //（z_ 前缀恰好挡住 ../ 穿越属幸运而非有意防御——显式校验）
+        if !valid_custom_id(&tunnel_id) {
+            return Err("隧道 id 只能包含字母、数字、下划线和连字符".to_string());
+        }
         let app_dir = self.app_dir();
         let parsed_info = parse_ini_config(&config_content)?;
 
@@ -639,4 +644,44 @@ fn string_to_i32(s: &str) -> i32 {
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
     (hasher.finish() as i32).abs()
+}
+
+/// 自定义隧道 id 合法性（与 save 时对隧道名的约束一致：字母数字/下划线/连字符）。
+pub fn valid_custom_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::guard::GuardState;
+    use std::sync::Mutex;
+
+    #[test]
+    fn 自定义隧道id校验() {
+        assert!(valid_custom_id("my-tunnel_01"));
+        assert!(valid_custom_id("t"));
+        assert!(!valid_custom_id(""));
+        assert!(!valid_custom_id("a/b"), "斜杠会产生怪异文件名");
+        assert!(!valid_custom_id(".."), "穿越序列必须拒绝");
+        assert!(!valid_custom_id("a b"), "空格非法");
+        assert!(valid_custom_id("tü"), "与 save 的隧道名校验一致（Unicode 字母数字允许）");
+    }
+
+    #[test]
+    fn update_custom_tunnel拒绝非法id() {
+        let manager = CustomManager::new(Arc::new(FrpcManager::new(
+            std::env::temp_dir().join("fnos-custom-id-test"),
+            tokio::sync::broadcast::channel(1).0,
+            Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            GuardState::new(),
+        )));
+        let err = manager
+            .update_custom_tunnel("../evil".to_string(), "[t]\ntype = tcp".to_string())
+            .unwrap_err();
+        assert!(err.contains("只能包含"), "err: {err}");
+    }
 }

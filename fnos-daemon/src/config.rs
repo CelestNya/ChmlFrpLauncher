@@ -40,10 +40,7 @@ impl DaemonConfig {
             .or_else(|| env_var_path("DAEMON_WEB_DIR"))
             .unwrap_or_else(|| default_data_dir().join("web"));
 
-        let port = std::env::var("TRIM_SERVICE_PORT")
-            .ok()
-            .and_then(|v| v.parse::<u16>().ok())
-            .unwrap_or(DEV_DEFAULT_PORT);
+        let port = parse_service_port(std::env::var("TRIM_SERVICE_PORT").ok()).0;
 
         Self {
             data_dir,
@@ -84,4 +81,39 @@ fn default_data_dir() -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("data")
+}
+
+/// 解析服务端口（TRIM_SERVICE_PORT）。返回 (端口, 是否告警过)：
+/// 非法/越界值时回退默认端口并告警（原实现静默回退，生产端口错配无任何提示）。
+fn parse_service_port(raw: Option<String>) -> (u16, bool) {
+    let Some(raw) = raw else {
+        return (DEV_DEFAULT_PORT, false);
+    };
+    match raw.trim().parse::<u16>() {
+        Ok(port) => (port, false),
+        Err(_) => {
+            tracing::warn!(
+                "TRIM_SERVICE_PORT 非法（{raw}），回退默认端口 {DEV_DEFAULT_PORT}"
+            );
+            (DEV_DEFAULT_PORT, true)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 端口解析() {
+        assert_eq!(parse_service_port(Some("17890".to_string())), (17890, false));
+        assert_eq!(parse_service_port(Some(" 8080 ".to_string())), (8080, false));
+        assert_eq!(parse_service_port(None), (DEV_DEFAULT_PORT, false));
+        let (port, warned) = parse_service_port(Some("not-a-port".to_string()));
+        assert_eq!(port, DEV_DEFAULT_PORT);
+        assert!(warned, "非法端口应触发告警");
+        let (port, warned) = parse_service_port(Some("99999".to_string()));
+        assert_eq!(port, DEV_DEFAULT_PORT);
+        assert!(warned, "越界端口应触发告警");
+    }
 }

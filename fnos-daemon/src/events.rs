@@ -83,3 +83,69 @@ impl Event {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    fn new_history() -> LogHistory {
+        Arc::new(Mutex::new(VecDeque::new()))
+    }
+
+    fn log_event(i: usize) -> Event {
+        Event::log(LogMessage {
+            tunnel_id: 1,
+            message: format!("m{i}"),
+            timestamp: "t".to_string(),
+        })
+    }
+
+    #[test]
+    fn 环形缓冲满时逐出最旧() {
+        let history = new_history();
+        for i in 0..(LOG_HISTORY_CAP + 10) {
+            push_log_history(&history, &log_event(i));
+        }
+        let h = history.lock().unwrap();
+        assert_eq!(h.len(), LOG_HISTORY_CAP, "缓冲不应超过容量");
+        let oldest: serde_json::Value = serde_json::from_str(h.front().unwrap()).unwrap();
+        assert_eq!(oldest["payload"]["message"], "m10", "最旧 10 条应被逐出");
+        let newest: serde_json::Value = serde_json::from_str(h.back().unwrap()).unwrap();
+        assert_eq!(newest["payload"]["message"], "m521", "最新帧应保留");
+    }
+
+    #[test]
+    fn 非frpc日志不入缓冲() {
+        let history = new_history();
+        push_log_history(
+            &history,
+            &Event::download_progress(DownloadProgress {
+                downloaded: 5,
+                total: 100,
+                percentage: 5.0,
+            }),
+        );
+        push_log_history(
+            &history,
+            &Event::auto_restarted(AutoRestartedPayload {
+                tunnel_id: 1,
+                timestamp: "t".to_string(),
+            }),
+        );
+        assert!(
+            history.lock().unwrap().is_empty(),
+            "高频/守护事件不应冲掉日志缓冲"
+        );
+    }
+
+    #[test]
+    fn 帧序列化含type字段_ws直接透发() {
+        // ws.rs 直接透发缓冲里的 JSON 字符串，帧必须自包含 type 字段
+        let event = log_event(0);
+        let json = serde_json::to_string(&event).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["type"], "frpc-log");
+        assert_eq!(v["payload"]["tunnel_id"], 1);
+    }
+}

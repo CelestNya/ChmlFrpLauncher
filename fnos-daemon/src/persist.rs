@@ -139,10 +139,23 @@ fn load_persisted_tunnels_from_file(path: &Path) -> HashMap<i32, PersistedTunnel
     if !path.exists() {
         return HashMap::new();
     }
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|content| serde_json::from_str(&content).ok())
-        .unwrap_or_default()
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    match serde_json::from_str(&content) {
+        Ok(map) => map,
+        Err(e) => {
+            // daemon 中-12：损坏文件不再静默清空全部记录（PID 全失、守护失联）
+            // ——备份损坏文件后告警，由后续 save 重建
+            let bak = path.with_extension(format!(
+                "corrupt-{}",
+                chrono::Local::now().format("%Y%m%d%H%M%S")
+            ));
+            let _ = std::fs::rename(path, &bak);
+            tracing::warn!("running_tunnels.json 损坏，已备份到 {}: {e}", bak.display());
+            HashMap::new()
+        }
+    }
 }
 
 fn write_persisted_tunnels(
@@ -350,6 +363,25 @@ mod tests {
         let recovered = p.recover_running_tunnels();
         assert_eq!(recovered.len(), 1, "死亡 pid 未剔除");
         assert_eq!(recovered[0].tunnel_id, 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 损坏文件备份后重建() {
+        let dir = temp_dir("corrupt");
+        let file = dir.join("running_tunnels.json");
+        std::fs::write(&file, "{ not valid json").unwrap();
+        let p = Persistence::new(&dir);
+        assert!(p.get_all_records().is_empty(), "损坏文件按空处理");
+        assert!(
+            !file.exists(),
+            "损坏文件应被改名备份（不覆盖原路径，后续 save 重建）"
+        );
+        let has_backup = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().contains("corrupt-"));
+        assert!(has_backup, "应保留 corrupt-* 备份供排查");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
