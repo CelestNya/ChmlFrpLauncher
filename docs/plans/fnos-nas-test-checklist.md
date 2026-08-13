@@ -84,3 +84,14 @@
 
 - [x] dist/index.html 含 `__FNOS_BOOT__` + shim（浏览器加载时注入，业务代码零改动）
 - [x] daemon 启动日志：鉴权 None + 守护默认开 + 存量隧道恢复注册
+
+### review 修复真机验证（2026-08-13 晚，P2/P3/P5）
+
+> 部署方式更新：**同版本 install-fpk 幂等跳过**（app 表 version=0.8.0 已装，install 只 verify 不执行，
+> 无 install_start 日志）。**正确升级姿势 = uninstall → install-fpk --volume 1**（先备份数据目录到
+> `/vol1/1000/1/`），无需 bump 版本号（版本与上游同步）。
+
+- [x] **P2 凭据完整往返**：save_credential（含 `usergroup:"vip"`/userimg/tunnel_count/tunnel）→ credential.json 落盘 → get_credential 读回全部字段一致（`{"usergroup":"vip",...}`）→ clear_credential 清理。会员门控字段不再丢
+- [x] **P3 壁纸托管 URL**：save_background_image（dataURL `aGVsbG8=`）→ backgrounds/test-bg.png 落盘 → `GET /app/chmlfrp/assets/backgrounds/test-bg.png` → **HTTP 200 + 内容 `hello`**（网关前缀下可达）。前端经 `new URL(rel, location.href)` 得含 `/app/chmlfrp/` 的绝对 URL 可渲染
+- [x] 守护默认开 `{"data":true}` + capabilities 能力面正常（不含 capabilities 自身、不含 NO_OP 桌面命令）
+- [x] uninstall → install 流程验证：备份（frpc/日志）→ uninstall success → install complete → start → 新 daemon 15:19 启动 → frpc 保留（备份带回）→ 命令全可用
