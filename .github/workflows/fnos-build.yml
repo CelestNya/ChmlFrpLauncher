@@ -11,10 +11,15 @@ on:
       - "v*"
   workflow_dispatch:
 
+# D4：最小权限——构建只需读仓库；attach-bundles 单独声明 write（上传 release asset）
+permissions:
+  contents: read
+
 jobs:
   build-fnos:
     name: fnOS .fpk (${{ matrix.arch }})
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -68,14 +73,25 @@ jobs:
       # aarch64 musl 交叉链接器：zig cc（zig 自带 musl libc，GitHub release 下载稳定；
       # musl.cc 预编译工具链在 runner 上超时）。apt 的 gcc-aarch64-linux-gnu 是 gnu 交叉，
       # 不满足 daemon 的 musl 静态编译要求（fnOS glibc 2.36）。
+      - name: Cache aarch64 musl toolchain
+        if: matrix.arch == 'aarch64'
+        id: musl-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/aarch64-linux-musl-cross
+          key: musl-cross-aarch64-v0.0.1
+
       - name: Setup aarch64 musl toolchain
         if: matrix.arch == 'aarch64'
         run: |
           # aarch64-linux-musl-cross 交叉工具链（musl.cc GitHub 镜像：runner 可访问；
-          # musl.cc 官网在 runner 上 443 超时）
-          curl -fsSL --retry 3 --retry-delay 5 -o /tmp/aarch64-musl.tgz \
-            https://github.com/musl-cc/musl.cc/releases/latest/download/aarch64-linux-musl-cross.tgz
-          tar xzf /tmp/aarch64-musl.tgz -C /tmp
+          # musl.cc 官网在 runner 上 443 超时）。D6：锁定 release tag 而非 latest，
+          # 镜像更新/改资产不会悄悄改变工具链
+          if [ ! -x /tmp/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc ]; then
+            curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 15 -o /tmp/aarch64-musl.tgz \
+              https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/aarch64-linux-musl-cross.tgz
+            tar xzf /tmp/aarch64-musl.tgz -C /tmp
+          fi
           /tmp/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc --version | head -1
           echo "/tmp/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
 
@@ -115,6 +131,9 @@ jobs:
     needs: build-fnos
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
     steps:
       - name: Download all fnOS bundles
         uses: actions/download-artifact@v4
