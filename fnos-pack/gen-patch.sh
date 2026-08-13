@@ -3,11 +3,12 @@
 # 从 patcher 分支生成 fnOS 前端 patch（ui + feature），覆盖 fnos-pack/patches/。
 #
 # 用法（patcher 分支，仓库根目录执行）:
-#   bash fnos-pack/gen-patch.sh            # 用 origin/main 作基线
-#   BASE=origin/main bash fnos-pack/gen-patch.sh
+#   bash fnos-pack/gen-patch.sh            # 用 origin/main（fork 主分支）作基线
+#   BASE=upstream/develop bash fnos-pack/gen-patch.sh   # CI 用上游 develop 作基线
 #
-# 基线 = 上游最新（origin/main）。生成前建议先 git fetch origin main，
-# 保证 patch 基于最新上游，上游改动与 fnOS 改动的冲突提前暴露。
+# 基线 = fork 主分支（其 src/ 与上游 develop 一致，0 侵入不变式）。
+# CI 中显式传 BASE=upstream/develop 作防御（防止 fork main 意外被污染 src/）。
+# 生成前建议先 git fetch，保证 patch 基于最新上游，上游改动与 fnOS 改动的冲突提前暴露。
 #
 # 产出两个全量 patch（从干净上游可应用，幂等覆盖）：
 #   fnos-pack/patches/fnos-ui-patch.patch       # UI 裁剪（4 文件）
@@ -34,6 +35,8 @@ FEATURE_FILES=(
   src/lib/sound.ts
   src/services/frpcManager.ts
   src/components/App/hooks/useTunnelNotifications.ts
+  src/components/pages/TunnelList/hooks/useTunnelProgress.ts
+  src/components/pages/Logs.tsx
 )
 
 echo "[gen-patch] 基线: $BASE"
@@ -56,6 +59,24 @@ git diff "$BASE" -- "${FEATURE_FILES[@]}" > "$PATCH_DIR/fnos-feature-patch.patch
 echo "[gen-patch] ✅ 已生成:"
 echo "  fnos-ui-patch.patch       ($(grep -c '^---' "$PATCH_DIR/fnos-ui-patch.patch") 文件)"
 echo "  fnos-feature-patch.patch  ($(grep -c '^---' "$PATCH_DIR/fnos-feature-patch.patch") 文件)"
+
+# E6：差异完整性自检——src/ 相对基线的全部差异必须被登记清单覆盖
+#（useTunnelProgress 教训：漏登记 = 修复不进产物且 dry-run 自检仍通过）。
+# *.test.ts 豁免：测试文件是 patcher 独有（不进 patch、不进构建产物，main 保持 0 侵入）。
+UNREGISTERED="$(git diff --name-only "$BASE" -- src/ \
+    | grep -v '\.test\.ts$' \
+    | grep -vxF -f <(printf '%s\n' "${UI_FILES[@]}" "${FEATURE_FILES[@]}") || true)"
+if [ -n "$UNREGISTERED" ]; then
+    echo "[gen-patch] ❌ src/ 存在未登记的差异文件（漏 patch！须加入 UI_FILES/FEATURE_FILES）:" >&2
+    echo "$UNREGISTERED" | sed 's/^/  /' >&2
+    exit 1
+fi
+UNTRACKED="$(git status --porcelain src/ | grep '^??' || true)"
+if [ -n "$UNTRACKED" ]; then
+    echo "[gen-patch] ❌ src/ 存在未跟踪文件（git diff 不捕获、不会进 patch）:" >&2
+    echo "$UNTRACKED" | sed 's/^/  /' >&2
+    exit 1
+fi
 
 # 自检：从干净的 src 应用是否通过（用临时目录验证）
 echo "[gen-patch] 自检 patch 可应用…"
