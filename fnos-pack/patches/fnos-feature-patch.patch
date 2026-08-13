@@ -1,3 +1,24 @@
+diff --git a/src/components/App/hooks/useAppInitialization.ts b/src/components/App/hooks/useAppInitialization.ts
+index a3c99f3..bff7937 100644
+--- a/src/components/App/hooks/useAppInitialization.ts
++++ b/src/components/App/hooks/useAppInitialization.ts
+@@ -12,8 +12,15 @@ export function useAppInitialization() {
+     const initProcessGuard = async () => {
+       try {
+         const { invoke } = await import("@tauri-apps/api/core");
++        // fnOS 适配：守护是核心安全特性（进程意外退出自动拉起），默认开启。
++        // 桌面版默认关闭（用户手动开），fnOS 环境首次使用（localStorage 无记录）时
++        // 默认 true；用户手动切换后尊重其选择。
++        const isFnos =
++          typeof window !== "undefined" &&
++          (window as unknown as { __FNOS__?: boolean }).__FNOS__ === true;
++        const stored = localStorage.getItem("processGuardEnabled");
+         const guardEnabled =
+-          localStorage.getItem("processGuardEnabled") === "true";
++          stored === "true" || (isFnos && stored === null);
+         await invoke("set_process_guard_enabled", { enabled: guardEnabled });
+       } catch (error) {
+         console.error("Failed to initialize process guard:", error);
 diff --git a/src/components/App/hooks/useTunnelNotifications.ts b/src/components/App/hooks/useTunnelNotifications.ts
 index 65e71fc..5d9308f 100644
 --- a/src/components/App/hooks/useTunnelNotifications.ts
@@ -156,6 +177,23 @@ index 8a74b16..0da79f5 100644
          const isVideo = isVideoFile(filePath);
          const command = isVideo
            ? "copy_background_video"
+diff --git a/src/components/pages/Settings/hooks/useProcessGuard.ts b/src/components/pages/Settings/hooks/useProcessGuard.ts
+index 0ad1a48..753b5c8 100644
+--- a/src/components/pages/Settings/hooks/useProcessGuard.ts
++++ b/src/components/pages/Settings/hooks/useProcessGuard.ts
+@@ -5,8 +5,11 @@ import { toast } from "sonner";
+ export function useProcessGuard() {
+   const [guardEnabled, setGuardEnabled] = useState<boolean>(() => {
+     if (typeof window === "undefined") return false;
++    // fnOS 适配：守护默认开启（与 useAppInitialization 一致）；桌面版默认关闭
++    const isFnos =
++      (window as unknown as { __FNOS__?: boolean }).__FNOS__ === true;
+     const stored = localStorage.getItem("processGuardEnabled");
+-    return stored === "true";
++    return stored === "true" || (isFnos && stored === null);
+   });
+ 
+   const [guardLoading, setGuardLoading] = useState(false);
 diff --git a/src/components/pages/TunnelList/hooks/useTunnelProgress.ts b/src/components/pages/TunnelList/hooks/useTunnelProgress.ts
 index 360be33..db958fc 100644
 --- a/src/components/pages/TunnelList/hooks/useTunnelProgress.ts

@@ -37,6 +37,8 @@ FEATURE_FILES=(
   src/components/App/hooks/useTunnelNotifications.ts
   src/components/pages/TunnelList/hooks/useTunnelProgress.ts
   src/components/pages/Logs.tsx
+  src/components/App/hooks/useAppInitialization.ts
+  src/components/pages/Settings/hooks/useProcessGuard.ts
 )
 
 echo "[gen-patch] 基线: $BASE"
