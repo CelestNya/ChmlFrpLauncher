@@ -89,10 +89,23 @@ ensure_fnpack() {
 echo "[fnos-pack] ===== 构建 ChmlFrp fnOS .fpk ====="
 echo "[fnos-pack] 版本: $VERSION | 平台: $PLATFORM ($RUST_TARGET)"
 
+# 纯函数库（版本一致性校验等，可独立单测：bash fnos-pack/tests/lib.test.sh）
+source "$REPO_ROOT/fnos-pack/lib.sh"
+
+# E4：版本一致性——manifest == Cargo.toml（自更新 bundle 命名与 daemon 匹配，
+# 漂移 = 自更新通道静默失效）；package.json 是上游前端版本，仅提示不强制
+check_version_consistency "$PKG_TEMPLATE/manifest" "$REPO_ROOT/fnos-daemon/Cargo.toml" || exit 1
+PKG_VER=$(grep '"version"' "$REPO_ROOT/package.json" 2>/dev/null | head -1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+if [ -n "$PKG_VER" ] && [ "$PKG_VER" != "$VERSION" ]; then
+    echo "[fnos-pack] ⚠️ 前端 package.json 版本 ($PKG_VER) 与 fnOS 版 ($VERSION) 不一致（上游前端版本独立管理，仅提示）"
+fi
+
 mkdir -p "$OUT_DIR"
 
 # ---------- 1. 前端产物（patch + build + shim） ----------
 if [ "$SKIP_FRONTEND" = "1" ]; then
+    # E8：校验构建完成戳记——仅 index.html 存在不足以防复用陈旧/残缺产物
+    [ -f "$REPO_ROOT/dist-fnos/.build-ok" ] || { echo "[fnos-pack] ❌ --skip-frontend 但 dist-fnos 无构建完成戳记，请先跑 apply-patches.sh" >&2; exit 1; }
     [ -f "$REPO_ROOT/dist-fnos/index.html" ] || { echo "[fnos-pack] ❌ --skip-frontend 但 dist-fnos 不存在，请先构建前端" >&2; exit 1; }
     echo "[fnos-pack] ① 跳过前端构建，复用 dist-fnos/"
 else
@@ -155,14 +168,19 @@ import sys
 from PIL import Image
 src, pkg = sys.argv[1], sys.argv[2]
 img = Image.open(src).convert("RGBA")
-img.resize((64, 64), Image.LANCZOS).save(f"{pkg}/ICON.PNG", "PNG")
-img.resize((256, 256), Image.LANCZOS).save(f"{pkg}/ICON_256.PNG", "PNG")
-img.resize((256, 256), Image.LANCZOS).save(f"{pkg}/app/ui/images/icon_256.png", "PNG")
-img.resize((64, 64), Image.LANCZOS).save(f"{pkg}/app/ui/images/icon_64.png", "PNG")
+# E3：Pillow ≥10 移除了 Image.LANCZOS——用 getattr 兼容新旧版本
+resample = getattr(Image, "Resampling", Image).LANCZOS
+img.resize((64, 64), resample).save(f"{pkg}/ICON.PNG", "PNG")
+img.resize((256, 256), resample).save(f"{pkg}/ICON_256.PNG", "PNG")
+img.resize((256, 256), resample).save(f"{pkg}/app/ui/images/icon_256.png", "PNG")
+img.resize((64, 64), resample).save(f"{pkg}/app/ui/images/icon_64.png", "PNG")
 print("[fnos-pack] 图标生成完成")
 PY
 else
-    echo "[fnos-pack] ⚠️ PIL 不可用，跳过图标缩放（.fpk 将缺 ICON*.PNG）" >&2
+    # E7：图标缺失不再「仅警告继续」——.fpk 必须含 ICON*.PNG，静默降级产出
+    # 不合规安装包（与 daemon 静态链接校验的严格度对齐）
+    echo "[fnos-pack] ❌ PIL 不可用，无法生成图标（.fpk 必须含 ICON*.PNG）" >&2
+    exit 1
 fi
 
 # ---------- 4. fnpack build ----------

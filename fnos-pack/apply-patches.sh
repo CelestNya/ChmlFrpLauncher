@@ -13,28 +13,35 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# 纯函数库（E1 目录校验等，可独立单测：bash fnos-pack/tests/lib.test.sh）
+source "$REPO_ROOT/fnos-pack/lib.sh"
 PATCH_FILE="$REPO_ROOT/fnos-pack/patches/fnos-ui-patch.patch"
 FEATURE_PATCH_FILE="$REPO_ROOT/fnos-pack/patches/fnos-feature-patch.patch"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/dist-fnos}"
+# E1：输出目录边界校验（本脚本会 rm -rf 该目录，防误删仓库）
+validate_output_dir "$OUTPUT_DIR" "$REPO_ROOT" || exit 1
 TMP_WORK="$(mktemp -d)"
 trap 'rm -rf "$TMP_WORK"' EXIT
 
 echo "[fnos-pack] 复制源码到临时副本…"
 cp -r "$REPO_ROOT/src" "$TMP_WORK/src"
-cp "$REPO_ROOT/package.json" "$REPO_ROOT/index.html" "$REPO_ROOT/tsconfig.json" \
-   "$REPO_ROOT/tsconfig.app.json" "$REPO_ROOT/tsconfig.node.json" \
-   "$REPO_ROOT/vite.config.ts" "$TMP_WORK/" 2>/dev/null || true
+# E2：构建所需文件显式检查后裸 cp（缺失即失败，不再 || true 静默——
+# public/ 缺失时 vite 构建仍会成功、产物静默缺音效等文件）
+for f in package.json index.html tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts; do
+    if [ ! -f "$REPO_ROOT/$f" ]; then
+        echo "[fnos-pack] ❌ 缺少构建配置文件: $f" >&2
+        exit 1
+    fi
+    cp "$REPO_ROOT/$f" "$TMP_WORK/"
+done
 # public/ 静态资源（音效 mp3 等）：不复制则 vite 构建产物缺文件
-cp -r "$REPO_ROOT/public" "$TMP_WORK/public" 2>/dev/null || true
+if [ ! -d "$REPO_ROOT/public" ]; then
+    echo "[fnos-pack] ❌ 缺少 public/ 静态资源目录" >&2
+    exit 1
+fi
+cp -r "$REPO_ROOT/public" "$TMP_WORK/public"
 
 # patch 可能涉及的文件（其余依赖源码文件保持原样）
-for f in \
-  src/App.tsx \
-  src/components/pages/Settings/index.tsx \
-  src/components/pages/Settings/components/AppearanceSection.tsx \
-  src/components/pages/Settings/components/SystemSection.tsx; do
-  cp "$REPO_ROOT/$f" "$TMP_WORK/$f"
-done
 
 echo "[fnos-pack] 预检 patch（--dry-run）…"
 if ! patch -p1 --dry-run -d "$TMP_WORK" < "$PATCH_FILE"; then
@@ -86,8 +93,22 @@ echo "[fnos-pack] 构建前端…"
 echo "[fnos-pack] 注入 shim…"
 node "$REPO_ROOT/fnos-shim/build-shim.mjs" --dist "$TMP_WORK/dist"
 
-# 产物复制到输出目录
-rm -rf "$OUTPUT_DIR"
+# 产物输出：原子交换（E1）——构建到临时目录后整体换入，失败回滚旧产物，
+# 杜绝「rm→mkdir→cp 中途失败留下残缺 dist-fnos」被 --skip-frontend 复用
+rm -rf "$OUTPUT_DIR.old" 2>/dev/null || true
+if [ -d "$OUTPUT_DIR" ]; then
+    mv "$OUTPUT_DIR" "$OUTPUT_DIR.old"
+fi
 mkdir -p "$OUTPUT_DIR"
-cp -r "$TMP_WORK/dist/." "$OUTPUT_DIR/"
+if ! cp -r "$TMP_WORK/dist/." "$OUTPUT_DIR/"; then
+    echo "[fnos-pack] ❌ 产物复制失败，回滚旧产物" >&2
+    rm -rf "$OUTPUT_DIR"
+    if [ -d "$OUTPUT_DIR.old" ]; then
+        mv "$OUTPUT_DIR.old" "$OUTPUT_DIR"
+    fi
+    exit 1
+fi
+rm -rf "$OUTPUT_DIR.old" 2>/dev/null || true
+# E8：构建完成戳记（build-fpk.sh --skip-frontend 据此判断产物是否新鲜完整）
+touch "$OUTPUT_DIR/.build-ok"
 echo "[fnos-pack] ✅ 完成：产物位于 $OUTPUT_DIR"

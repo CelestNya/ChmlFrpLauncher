@@ -25,11 +25,23 @@ case "$1" in
             echo "chmlfrp is already running" >> "${LOG_FILE}"
             exit 0
         fi
+        # E5：二进制缺失/不可执行时 start 必须失败（官方退出码契约），
+        # 否则应用中心显示「运行中」但实际进程未起、用户点击打开白屏
+        if [ ! -x "${SVC}" ]; then
+            echo "daemon 二进制不存在或不可执行: ${SVC}" >> "${LOG_FILE}"
+            exit 1
+        fi
         echo "Starting chmlfrp ..." >> "${LOG_FILE}"
         mkdir -p "${TRIM_PKGVAR}"
         cd "${TRIM_PKGVAR}"
         nohup "${SVC}" >> "${LOG_FILE}" 2>&1 &
         echo $! > "${PID_FILE}"
+        # 启动失败检测：拉起后立即消失（二进制损坏/启动即崩）时报错退出
+        sleep 1
+        kill -0 "$(cat "${PID_FILE}" 2>/dev/null)" 2>/dev/null || {
+            echo "daemon 启动后立即退出，请检查日志 ${LOG_FILE}" >> "${LOG_FILE}"
+            exit 1
+        }
         exit 0
         ;;
     stop)
