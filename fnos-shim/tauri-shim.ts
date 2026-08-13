@@ -24,6 +24,13 @@
   const callbacks = new Map<number, Callback>();
   // ---- 事件监听：事件名 → callback id 集合（WS 分发目标）----
   const eventListeners = new Map<string, Set<number>>();
+  // ---- 帧暂存（B2 修复）：daemon 连接建立即全量补发，React 挂载前无 listener 的
+  // 帧会被丢弃——暂存后首次 listen 注册时以 replay:true 重放。上限 600（> daemon
+  // 补发量 512，防丢帧）。 ----
+  const MAX_PENDING_FRAMES = 600;
+  const pendingFrames: Array<{ type: string; payload: unknown }> = [];
+  // ---- updater 下载进度 Channel id（B6：download-progress 帧转发目标） ----
+  let updateChannelId: number | null = null;
   let nextId = 1;
 
   function transformCallback(callback: Callback, once = false): number {
@@ -53,6 +60,34 @@
     return m ? m[1] : "";
   }
 
+  // 扩展名 → MIME（dialog.open 的 accept 属性；未知扩展回退 .ext 原样）
+  function extToMime(ext: string): string {
+    const normalized = ext.replace(/^\./, "").toLowerCase();
+    switch (normalized) {
+      case "png":
+        return "image/png";
+      case "jpg":
+      case "jpeg":
+        return "image/jpeg";
+      case "gif":
+        return "image/gif";
+      case "bmp":
+        return "image/bmp";
+      case "svg":
+        return "image/svg+xml";
+      case "webp":
+        return "image/webp";
+      case "mp4":
+        return "video/mp4";
+      case "webm":
+        return "video/webm";
+      case "mp3":
+        return "audio/mpeg";
+      default:
+        return `.${normalized}`;
+    }
+  }
+
   function connectEvents(): void {
     if (typeof WebSocket === "undefined") return;
 
@@ -79,8 +114,20 @@
           return;
         }
         if (!frame.type) return;
+        // updater 下载进度：转发给 download_and_install 时登记的 Channel
+        if (frame.type === "download-progress" && updateChannelId !== null) {
+          runCallback(updateChannelId, { event: "Progress", data: frame.payload });
+        }
         const ids = eventListeners.get(frame.type);
-        if (!ids) return;
+        if (!ids) {
+          // B2：暂无 listener（React 未挂载 / 页面刚加载）→ 环形暂存，
+          // 首次 listen 注册时重放
+          pendingFrames.push({ type: frame.type, payload: frame.payload });
+          if (pendingFrames.length > MAX_PENDING_FRAMES) {
+            pendingFrames.shift();
+          }
+          return;
+        }
         const eventData = {
           event: frame.type,
           id: Date.now(),
@@ -103,23 +150,68 @@
   }
 
   // ---- 常规命令：POST /api/invoke 透传 ----
-  async function invokeCommand(cmd: string, args: Record<string, unknown>) {
-    const response = await fetch(`${gatewayPrefix()}/api/invoke`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cmd, args }),
+  // B4 修复：无超时（daemon 重启时前端永久卡 loading）+ 不检查 HTTP 状态
+  const INVOKE_TIMEOUT_MS = 60_000;
+  const LONG_INVOKE_COMMANDS = new Set(["download_frpc"]); // 下载类命令给更长时限
+
+  function withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    cmd: string,
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`invoke ${cmd} 超时（${Math.round(ms / 1000)}s）`)),
+        ms,
+      );
+      promise.then(
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      );
     });
-    const resp = (await response.json()) as {
-      ok: boolean;
-      data?: unknown;
-      error?: string;
-    };
-    if (resp.ok) return resp.data;
-    throw new Error(resp.error || `invoke ${cmd} 失败`);
+  }
+
+  async function invokeCommand(cmd: string, args: Record<string, unknown>) {
+    const timeoutMs = LONG_INVOKE_COMMANDS.has(cmd) ? 300_000 : INVOKE_TIMEOUT_MS;
+    const task = (async () => {
+      const response = await fetch(`${gatewayPrefix()}/api/invoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cmd, args }),
+      });
+      if (!response.ok) {
+        throw new Error(`invoke ${cmd} 失败 (HTTP ${response.status})`);
+      }
+      let resp: {
+        ok: boolean;
+        data?: unknown;
+        error?: string;
+      };
+      try {
+        resp = (await response.json()) as typeof resp;
+      } catch {
+        throw new Error(`invoke ${cmd} 响应不是合法 JSON`);
+      }
+      if (resp.ok) return resp.data;
+      throw new Error(resp.error || `invoke ${cmd} 失败`);
+    })();
+    return withTimeout(task, timeoutMs, cmd);
   }
 
   // ---- 插件命令降级 ----
-  function invokePlugin(cmd: string, args: Record<string, unknown>) {
+  // B1/B3 修复：Tauri 插件命令的第三参数 options（headers 通道 / options 嵌套）
+  // 此前被整体丢弃。invokePlugin 签名改为 (cmd, args, options)。
+  function invokePlugin(
+    cmd: string,
+    args: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ) {
     // 形如 plugin:event|listen
     const match = /^plugin:([^|]+)\|(.+)$/.exec(cmd);
     const plugin = match?.[1];
@@ -134,6 +226,21 @@
       const handler = args.handler as number;
       if (!eventListeners.has(event)) eventListeners.set(event, new Set());
       eventListeners.get(event)!.add(handler);
+      // B2：重放注册前暂存的帧（带 replay:true，前端去重/跳过通知），随后清空
+      const toReplay = pendingFrames.filter((f) => f.type === event);
+      if (toReplay.length > 0) {
+        for (const f of toReplay) {
+          runCallback(handler, {
+            event,
+            id: Date.now(),
+            replay: true,
+            payload: f.payload,
+          });
+        }
+        for (let i = pendingFrames.length - 1; i >= 0; i--) {
+          if (pendingFrames[i]!.type === event) pendingFrames.splice(i, 1);
+        }
+      }
       return Promise.resolve(handler);
     }
 
@@ -145,6 +252,8 @@
         set.delete(eventId);
         if (set.size === 0) eventListeners.delete(event);
       }
+      // B5：同步清理 callbacks 表，否则闭包（捕获 React 状态）永久滞留
+      unregisterCallback(eventId);
       return Promise.resolve();
     }
 
@@ -232,6 +341,9 @@
       plugin === "updater" &&
       (action === "download_and_install" || action === "downloadAndInstall")
     ) {
+      // B6：登记进度 Channel id——daemon 下载时广播 download-progress 帧，
+      // onmessage 转发给该 Channel（进度条不再恒 0）
+      updateChannelId = (args.onEvent as number | null) ?? null;
       return fetch(`${gatewayPrefix()}/api/update/download`, { method: "POST" })
         .then((r) => r.json())
         .then((resp: { ok?: boolean; error?: string }) => {
@@ -258,8 +370,27 @@
 
     // 文件写入：浏览器无真实文件系统，降级为下载
     if (plugin === "fs" && action === "write_text_file") {
-      const filePath = (args.path as string) || "chmlfrp.log";
-      const contents = (args.contents ?? args.data ?? "") as string;
+      // B1 修复：plugin-fs@2.5 真实形态 = invoke(cmd, Uint8Array(内容),
+      // {headers:{path: encodeURIComponent(...), options}})；shim 曾把二进制当
+      // args、丢弃第三参 → path 落空、内容为空（导出日志下载空文件）
+      const rawPath = (
+        options?.headers as { path?: string } | undefined
+      )?.path;
+      const filePath = rawPath
+        ? decodeURIComponent(rawPath)
+        : ((args as { path?: string }).path || "chmlfrp.log");
+      let contents: string;
+      // ArrayBuffer.isView 而非 instanceof Uint8Array：跨 realm 环境（测试 jsdom
+      // 的 TextEncoder 来自 Node realm）下 instanceof 恒 false
+      if (ArrayBuffer.isView(args)) {
+        contents = new TextDecoder().decode(args as Uint8Array);
+      } else {
+        contents = String(
+          (args as { contents?: unknown; data?: unknown }).contents ??
+            (args as { data?: unknown }).data ??
+            "",
+        );
+      }
       const blob = new Blob([contents], { type: "text/plain" });
       const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -277,14 +408,22 @@
       // 渲染链路无前缀时直接当 src 使用），前端 useBackgroundImage 有 __FNOS__
       // 分支跳过 daemon 拷贝。
       // 限制 2MB：dataURL base64 膨胀 ~33%，且存 localStorage（Chrome 每项 5MB）。
-      if (args.directory === true) {
+      // B3 修复：plugin-dialog 真实 payload 是 {options:{...}} 嵌套；
+      // accept 由 filters.extensions 动态生成（视频背景可选）
+      const opts = (args.options ?? {}) as {
+        directory?: boolean;
+        filters?: Array<{ name?: string; extensions?: string[] }>;
+      };
+      if (opts.directory === true) {
         // 文件夹选择暂不支持（浏览器无法返回目录路径），保持取消语义
         return Promise.resolve(null);
       }
+      const extensions = opts.filters?.[0]?.extensions ?? [];
+      const accept = extensions.length > 0 ? extensions.map(extToMime).join(",") : "image/*";
       return new Promise((resolve) => {
         const input = document.createElement("input");
         input.type = "file";
-        input.accept = "image/*";
+        input.accept = accept;
         // settled 保证只 resolve 一次（onchange / cancel / focus 兜底竞争）
         let settled = false;
         const finish = (value: string | null) => {
@@ -316,9 +455,10 @@
       });
     }
     if (plugin === "dialog" && action === "save") {
-      // 返回占位路径，write_text_file 降级为下载
+      // B3 修复：读 options.defaultPath（此前读 args.defaultPath 恒 undefined）
+      const opts = (args.options ?? {}) as { defaultPath?: string };
       const defaultPath =
-        (args.defaultPath as string) || `chmlfrp-${Date.now()}.log`;
+        opts.defaultPath || `chmlfrp-${Date.now()}.log`;
       return Promise.resolve(defaultPath);
     }
     if (
@@ -344,8 +484,9 @@
     invoke: (
       cmd: string,
       args: Record<string, unknown> = {},
+      options?: Record<string, unknown>,
     ) => {
-      if (cmd.startsWith("plugin:")) return invokePlugin(cmd, args);
+      if (cmd.startsWith("plugin:")) return invokePlugin(cmd, args, options);
       return invokeCommand(cmd, args);
     },
     transformCallback,

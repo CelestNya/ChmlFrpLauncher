@@ -68,6 +68,8 @@ describe("fnos-shim 测试加载器（批 0 设施冒烟）", () => {
 
   it("透传命令 POST /api/invoke 并解包 {ok,data}", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
       json: async () => ({ ok: true, data: "running" }),
     });
     vi.stubGlobal("fetch", fetchMock);

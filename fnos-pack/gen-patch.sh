@@ -36,6 +36,7 @@ FEATURE_FILES=(
   src/services/frpcManager.ts
   src/components/App/hooks/useTunnelNotifications.ts
   src/components/pages/TunnelList/hooks/useTunnelProgress.ts
+  src/components/pages/Logs.tsx
 )
 
 echo "[gen-patch] 基线: $BASE"
