@@ -44,7 +44,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22+：pnpm 11 要求 Node ≥ 22.13（22 是 LTS，本地验证过 Node 24 / pnpm 11.8）
+          node-version: 22
           cache: pnpm
 
       - name: Setup Rust
