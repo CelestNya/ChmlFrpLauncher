@@ -33,8 +33,15 @@ patcher ── main + src/ 上的侵入式 fnOS 改动（开发态）
 
 ### 上游同步（主仓更新时）
 
+**自动跟随（推荐，2026-08-13 新增）**：`fnos-upstream-follow.yml`（schedule 每 6 小时 + 手动触发）
+- 上游有新提交 → main merge 新上游（src/ 0 侵入天然无冲突）→ gen-patch 重生成 → build-fpk → 自动 PR「同步上游到 <sha>」供 review 合并
+- 冲突路径（上游改了 patch 涉及文件）→ 自动开 issue 报告，人工在 patcher 解冲突
+- 上游无新提交 → 静默退出（零成本）
+- **冲突概率实测**：上游 90 天改 49 文件仅撞 2 个 patch 文件（App.tsx/frpcManager.ts）
+
+**手动同步（冲突时兜底）**：
 ```
-main:   git fetch upstream && git rebase --onto upstream/develop upstream/main main（+ force push）
+main:   git fetch upstream && git merge upstream/develop（src/ 快进，无冲突）
 patcher: git rebase --onto main origin/main patcher（冲突在 patcher 人工解决，main 永远干净）
          → 修改后 push patcher → CI 重新生成 patch
 ```

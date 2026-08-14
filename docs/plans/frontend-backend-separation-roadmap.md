@@ -75,9 +75,10 @@
 
 ```
 M1（本次）前后端分离重构 —— ✅ 完成
-M2 上游发版后：跟随 tag 同步基线 → 发 v0.8.0 + attach fnOS bundle → 启用自更新
-M3（可选）能力协商消费侧 + Standards 重构 —— 按需触发
-M4（可选）桌面版数据层同步后端化（token 迁移 Rust）—— 当前 fnOS 先行，桌面跟随
+M2 上游自动跟随 CI（fnos-upstream-follow.yml）—— ✅ 完成（schedule 轮询 → merge → gen-patch → build-fpk → 自动 PR / 冲突 issue）
+M3 上游发版后：跟随 tag 同步基线 → 发 v0.8.0 + attach fnOS bundle → 启用自更新
+M4（可选）能力协商消费侧 + Standards 重构 —— 按需触发
+M5（可选）桌面版数据层同步后端化（token 迁移 Rust）—— 当前 fnOS 先行，桌面跟随
 ```
 
 **维护纪律**：每次改 fnOS 前端文件 → 登记 gen-patch（E6 拦截）；新增凭据/配置字段 → 三处同步（daemon struct + shim 映射 + WHITELIST/SUPPORTED_COMMANDS）。
