@@ -379,6 +379,24 @@ daemon credential.json / node_settings.json（0600）
 - **首帧 boot**：daemon `serve_index_with_boot` 注入 `__FNOS_BOOT__`（credential+nodeSettings），shim 同步读防闪烁
 - **渲染类偏好留守 localStorage**（ADR-0003：首帧同步读约束）；行为类 4 项后端化
 
+### fnOS API 版本化 + adapter 适配层（2026-08-13，ADR-0005）
+
+**三层解耦**：上游程序（服务面，不可控）→ adapter（每上游版本一个）→ API 契约（fnos-api，可控、版本化）→ patch 业务逻辑（对 API 版本硬依赖）。
+
+```
+上游 chmlfrp（服务面，不可控，上游 develop/main 双线）
+    ↓ adapter 映射（每版本一个，版本号 = API 版本）
+API 契约 fnos-api（可控，版本化 apiVersion）
+    ↓ patch 业务逻辑（manifest 声明 requires: {api: ">=X"} 硬依赖）
+fnOS 适配实现（daemon + shim）
+```
+
+- **契约位置**：`fnos-api/API.md`（六面：命令/事件/插件/存储/HTTP/UI，apiVersion 1.0.0）；`fnos-api/adapters/<上游版本>/manifest.json`（能力面声明）；`verify-adapter.sh`（前端 invoke 调用 ⊆ adapter 能力面校验）
+- **命令面**：45 上游命令 + fnOS 扩展（凭据 4 / 节点设置 2 / 壁纸 5 / clear_log_history / capabilities）
+- **版本化规则**：adapter 版本号 = API 版本号（不是上游版本号）；上游更新 ≠ API 更新，仅接口形态变化才 bump
+- **事实核查**：0.7.5 与 0.8.0-dev 命令面完全一致（45 命令 diff 零）→ adapter 命令映射跨版本零工作量
+- 开发流程（需求→bump→适配→开发）见 `docs/development.md` §patch 机制
+
 ### 现有技术债
 
 - `api.ts` 的 Tauri invoke 分支与浏览器 fetch 降级并存，两路径行为需保持一致（offline_tunnel 的响应处理有差异）

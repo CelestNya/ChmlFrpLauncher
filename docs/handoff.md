@@ -9,12 +9,12 @@
 
 ## 当前状态（一句话）
 
-**前后端分离重构已完成（阶段 0-5）**：token/代理配置经 shim 重定向离浏览器 localStorage 落 daemon 文件（0600），壁纸 fnOS 砍轮播 + 文件化，能力协商替代 NO_OP。全量回归绿（daemon 66 / vitest 45 / tsc / eslint / patch 可应用）。等真机部署验证。
+**前后端分离重构已完成（阶段 0-5）+ fnOS API 契约/adapter 架构已落地（ADR-0005）**：token/代理配置经 shim 重定向离浏览器 localStorage 落 daemon 文件（0600），壁纸 fnOS 砍轮播 + 文件化，能力协商替代 NO_OP；`fnos-api/` 契约（六面 + apiVersion 1.0.0）+ 第一个 adapter v0.7.5（能力覆盖验证 33 命令全通过）+ 需求→bump→适配→开发流程入库。全量回归绿（daemon 66 / vitest 45 / tsc / eslint / patch 可应用）。
 
 ## 待决策事项
 
-1. **真机验证**：重构后需部署 NAS 验证（credential 落 daemon、代理后端化、壁纸托管 URL、能力探测）。
-2. **发版策略**：上游 Latest = v0.7.5（2026-05-20），v0.8.0 仅 develop WIP。倾向跟随上游，NAS 0.8.0 仅内部测试版。
+1. **verify-adapter.sh 接入 CI**：目前是手动校验（development.md 已记录），可选加轻量 job 到 patchgen workflow 使「patch 对 API 硬依赖」自动强制。
+2. **发版策略**：上游 Latest = v0.7.5（2026-05-20），v0.8.0 仅 develop WIP。**版本号与上游同步、不 bump**（升级走 uninstall→install）；跟随上游节奏暂不发 release。
 3. **遗留项**：见 `docs/development.md` §七（自更新通道、daemon 自保、OAuth CORS、UI 适配、WS seq）。
 
 ## 已完成里程碑（2026-08-13）
@@ -29,10 +29,12 @@
 | 守护默认开启修复 | patcher 0ddb15e + PR #13 |
 | 市场升级 dist 权限修复 | patcher 34bc1d9（build-fpk.sh chmod go-w） |
 | **前后端分离重构（阶段 0-5）** | CONTEXT.md + docs/adr/0001-0004；shim 重定向 + daemon 存储 + 壁纸文件化 + capabilities |
+| **fnOS API 契约 + adapter 架构（ADR-0005）** | fnos-api/API.md + adapters/v0.7.5/manifest.json + verify-adapter.sh（33 命令覆盖验证通过）+ development.md §patch 机制；双分支提交 9c763df/6a8b775 |
 
 ## 最近提交（patcher）
 
 ```
+9c763df feat(fnos): 落地 fnOS API 契约 + adapter v0.7.5（ADR-0005）
 1eb476c docs(fnos): 归档 NAS 真机验证（review 状态表 + patch 维护文档）
 04bc96d docs(fnos): NAS 测试清单归档 dist 权限修复与守护默认开启验证
 34bc1d9 fix(fnos): build-fpk 打包时收紧 dist 权限（市场升级不替换 dist 修复）
@@ -45,7 +47,7 @@
 - **工作目录**：D:\Projects\2026-SummerHoliday\ChmlFrpLauncher
 - **fork**：CelestNya/ChmlFrpLauncher · 上游：TechCat-Team/ChmlFrpLauncher（develop 基线）
 - **NAS**：192.168.12.32（SSH 凭据在 `C:\Users\CelestNya\AppData\Local\Temp\nas-*.py`）；访问 `https://nas.letian.us.kg/app/chmlfrp`
-- **CI**：fnos-build.yml（构建 .fpk）/ fnos-patchgen.yml（patch 自动 PR）
+- **CI**：fnos-build.yml（构建 .fpk）/ fnos-patchgen.yml（patch 自动 PR）/ fnos-upstream-follow.yml（上游自动跟随，每 6h 轮询）
 
 ## 关键经验（详见项目记忆）
 

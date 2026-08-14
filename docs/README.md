@@ -9,6 +9,7 @@ ChmlFrpLauncher 项目文档（桌面版 + fnOS 移植）。
 | [architecture.md](architecture.md) | **架构**——系统全貌 / Rust 后端 / 前端 / 外部契约 / 事件通道 / 存储 / fnOS 决策 | 架构实质变更时（新模块、契约变化、形态演进） |
 | [development.md](development.md) | **开发须知**——双分支工作流 / patch 机制 / 构建链 / NAS 部署 / 测试 / 发版策略 / 遗留 | 流程、工具、部署方式变更时 |
 | [handoff.md](handoff.md) | **交接**——当前状态 / 待决策 / 已完成里程碑 / 关键环境 | 每次会话结束时（随代码变更实时更新） |
+| [fnos-api/API.md](../fnos-api/API.md) | **fnOS API 契约**——六面（命令/事件/插件/存储/HTTP/UI），版本化 | API 接口变更时（bump apiVersion） |
 
 ## 辅助文档
 

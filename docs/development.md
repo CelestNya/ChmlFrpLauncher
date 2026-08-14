@@ -143,8 +143,23 @@ fnos-api/
 ```bash
 # fpk 上传后（scp 到 /tmp/）
 sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
-# ⚠️ 必须 --volume 1（1 = 第一存储卷）；应用 running 同版本会跳过（先 stop 或升版本）
+# ⚠️ 必须 --volume 1（1 = 第一存储卷）
 ```
+
+**版本号与上游同步，不 bump**（用户定论 2026-08-13）：同版本升级时 `install-fpk` 幂等跳过
+（`Application is installed`，只有全新安装才真正执行）→ 正确姿势 = **先卸载再装**：
+
+```bash
+# 1. 备份数据目录（frpc 二进制 / g_*.ini / 日志）到共享文件夹
+sudo cp -r /vol1/@appdata/chmlfrp /vol1/1000/1/chmlfrp-backup-$(date +%Y%m%d)
+# 2. 卸载（不清数据备份）
+sudo appcenter-cli uninstall chmlfrp
+# 3. 重装
+sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
+# 4. 验证后还原备份（frpc / 隧道配置）
+```
+
+> 已在真机验证（checklist 归档）：备份 → uninstall success → install complete → 命令全可用。
 
 **🛑 永远不要用 `install-local` 升级已装应用**——它先 uninstall 清空 `/vol1/@appdata/<app>/` 数据目录
 （8/13 事故根因：frpc 二进制/隧道配置全删；code 10237 是 cmd 脚本执行位 bug，每次必失败但副作用照常）。
@@ -192,7 +207,8 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 
 **当前（2026-08-13 用户决策）**：上游未发 0.8.0 release（Latest = v0.7.5），dev 代码刚动（8-12 升级依赖），**跟随上游节奏暂不发 release**。
 
-- NAS 上的 0.8.0 仅内部测试版，走 `install-fpk --volume 1` 手动升级
+- **版本号永远与上游同步，不 bump**（用户定论）：fnOS 改动不升版本号，升级走 uninstall→install（§四）；E4 版本一致性保证 manifest/Cargo.toml/package.json 三处一致
+- NAS 上的 0.8.0 仅内部测试版，走 uninstall→install-fpk --volume 1 手动升级
 - 自更新通道（依赖 GitHub Release asset）等上游发版后再启用
 - 上游发版后：跟随 tag 同步基线 → 发我们的 v0.8.0 + attach fnOS bundle
 
