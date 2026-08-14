@@ -84,6 +84,37 @@ fnos-pack/patches/
 - `apply-patches.sh` 内置两段验证（失败即 exit 1）：UI 精简（无 TitleBar/AntivirusWarningDialog）、feature（useBackgroundImage 含 __FNOS__、useTunnelNotifications 含 replay）
 - `gen-patch.sh` 内置自检：两个 patch 可从基线干净应用
 
+### fnOS API 版本化 + adapter（ADR-0005，2026-08-13）
+
+**三层解耦**：上游程序（服务面，不可控）→ adapter（每上游版本一个）→ API 契约（fnos-api，可控、版本化）→ patch 业务逻辑（对 API 版本硬依赖）。
+
+```
+fnos-api/
+├── API.md                        # 契约人读版（六面：命令/事件/插件/存储/HTTP/UI），apiVersion 1.0.0
+├── verify-adapter.sh             # 能力覆盖校验：前端 invoke 调用 ⊆ adapter 能力面
+└── adapters/
+    └── v0.7.5/
+        └── manifest.json         # 第一个 adapter（adapterVersion 1.0.0 = apiVersion）
+```
+
+**版本化规则**：
+
+| 对象 | 版本号语义 | 依赖 |
+|------|-----------|------|
+| API | 接口演进 semver（major=破坏 / minor=新增 / patch=修复） | — |
+| adapter | **= API 版本号**（声明适配的 API），每上游版本一个 | 上游版本 |
+| patch | 功能版本 | `requires: {api: ">=X"}` 硬依赖 |
+
+**开发流程（patcher 有新需求时）**：
+1. 先更新 `fnos-api/API.md`（加接口/改契约）→ bump API 版本
+2. adapter 适配新 API（对应上游版本）→ bump adapterVersion = apiVersion
+3. patch 基于新 API 开发 → manifest 声明 `requires: {api: ">=新版本"}`
+4. `bash fnos-api/verify-adapter.sh` 校验：前端调用命令 ⊆ adapter 能力面
+5. 上游出新版本 → 新增 adapter（命令映射复用，差异登记）；上游内部实现改动（如 token 刷新）→ 登记差异但**不 bump API**
+
+> 关键原则：**上游更新 ≠ API 更新**——只有「上游改动影响接口形态」才 bump API。
+> 事实核查（2026-08-13）：0.7.5 与 0.8.0-dev 命令面完全一致（45 命令 diff 零），adapter 命令映射跨版本零工作量。
+
 ---
 
 ## 三、构建链（fnos-pack/）
