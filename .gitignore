@@ -33,3 +33,7 @@ data
 
 # fnos 构建缓存（勿提交）
 .fnpack-cache/
+fnos-api/
+fnos-pack/
+fnos-daemon/
+fnos-shim/
