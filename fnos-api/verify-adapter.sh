@@ -21,11 +21,11 @@ echo "[verify-adapter] 校验 adapter: $ADAPTER_MANIFEST"
 #    扫描对象 = src/（patcher 开发态：含 fnOS 改动）+ fnos-pack/patches/（组合构建态：src 干净，
 #    fnOS 改动在 patch 文件里，只统计新增行）
 USED_COMMANDS=$(find "$REPO_ROOT/src" \( -name "*.ts" -o -name "*.tsx" \) \
-    -exec grep -hoP 'invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' {} + 2>/dev/null)
+    -exec grep -hoP 'invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' {} + 2>/dev/null || true)
 if [ -d "$REPO_ROOT/fnos-pack/patches" ]; then
     USED_COMMANDS="$USED_COMMANDS
 $(find "$REPO_ROOT/fnos-pack/patches" -name "*.patch" \
-    -exec grep -hoP '^\+.*invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' {} + 2>/dev/null)"
+    -exec grep -hoP '^\+.*invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' {} + 2>/dev/null || true)"
 fi
 USED_COMMANDS=$(echo "$USED_COMMANDS" | sort -u)
 echo "=== 实际 invoke 的命令（$(echo "$USED_COMMANDS" | wc -l) 个）==="
@@ -69,11 +69,11 @@ fi
 # 扫描 uiConfig.xxx 引用（src 开发态 + patches 组合态，排除生成文件本身）
 USED_KEYS=$(find "$REPO_ROOT/src" \( -name "*.ts" -o -name "*.tsx" \) \
     ! -name "fnos-ui-config.ts" \
-    -exec grep -hoP 'uiConfig\.\K[a-zA-Z0-9_]+' {} + 2>/dev/null)
+    -exec grep -hoP 'uiConfig\.\K[a-zA-Z0-9_]+' {} + 2>/dev/null || true)
 if [ -d "$REPO_ROOT/fnos-pack/patches" ]; then
     USED_KEYS="$USED_KEYS
 $(find "$REPO_ROOT/fnos-pack/patches" -name "*.patch" \
-    -exec grep -hoP '^\+.*uiConfig\.\K[a-zA-Z0-9_]+' {} + 2>/dev/null)"
+    -exec grep -hoP '^\+.*uiConfig\.\K[a-zA-Z0-9_]+' {} + 2>/dev/null || true)"
 fi
 USED_KEYS=$(echo "$USED_KEYS" | sort -u)
 MISSING_KEY=0
