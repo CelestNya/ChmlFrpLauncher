@@ -104,8 +104,13 @@ export function Logs() {
   }, [logs, autoScroll]);
 
   const handleClearLogs = () => {
-    logStore.clearLogs();
-    toast.success("日志已清空");
+    // fnOS：清空 daemon 补发缓冲失败时提示——否则刷新页面后旧日志会「复活」
+    void logStore.clearLogs().then((ok) => {
+      toast.success("日志已清空");
+      if (!ok) {
+        toast.error("daemon 日志缓冲清空失败，刷新页面可能重现旧日志");
+      }
+    });
   };
 
   const handleSaveLogs = async () => {

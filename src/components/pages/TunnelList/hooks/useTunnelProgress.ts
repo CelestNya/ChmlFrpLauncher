@@ -457,6 +457,23 @@ export function useTunnelProgress(
       processedLogsCountRef.current = logs.length;
 
       for (const log of newLogs) {
+        // fnOS：daemon 断线重连补发的历史帧（replay）只恢复进度展示，
+        // 不触发进度/日志生成/toast/音效/超时（与 useTunnelNotifications 一致，防重复）
+        if (log.replay) {
+          // B10：页面重载后 store 为空、补发在挂载后到达——replay 帧仅做纯进度
+          // 转移，运行中隧道的进度条不再永远停在 0
+          const restored = restoreProgressFromLogs([log]);
+          if (restored.size > 0) {
+            setTunnelProgress((prev) => {
+              const merged = new Map(prev);
+              for (const [tunnelId, progress] of restored) {
+                merged.set(`api_${tunnelId}`, { ...progress, isSuccess: false });
+              }
+              return merged;
+            });
+          }
+          continue;
+        }
         const tunnelId = log.tunnel_id;
         const tunnelKey = `api_${tunnelId}`;
         const message = log.message;

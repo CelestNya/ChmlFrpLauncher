@@ -25,6 +25,7 @@ import { BackgroundLayer } from "@/components/App/components/BackgroundLayer";
 import { getInitialSidebarMode } from "@/components/pages/Settings/utils";
 import type { SidebarMode } from "@/components/pages/Settings/types";
 import { cn } from "@/lib/utils";
+import { uiConfig } from "@/fnos-ui-config";
 
 function App() {
   const [activeTab, setActiveTab] = useState("home");
@@ -54,11 +55,11 @@ function App() {
   const { updateInfo, setUpdateInfo } = useUpdateCheck();
   const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
 
-  // 常量计算
-  const shouldShowTitleBar = isMacOS ? showTitleBar : isWindows ? showTitleBar : true;
-  const isTitleBarHidden = (isMacOS || isWindows) && !showTitleBar;
-  const shouldPadTop = shouldShowTitleBar || (isWindows && !showTitleBar);
-  const SIDEBAR_LEFT = isMacOS && !showTitleBar ? 10 : 15;
+  // 常量计算（fnOS：uiConfig 裁剪标题栏相关 UI，平台分支随配置关闭）
+  const shouldShowTitleBar = uiConfig.titleBar ? (isMacOS ? showTitleBar : isWindows ? showTitleBar : true) : false;
+  const isTitleBarHidden = uiConfig.titleBar && (isMacOS || isWindows) && !showTitleBar;
+  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : false;
+  const SIDEBAR_LEFT = uiConfig.titleBar && isMacOS && !showTitleBar ? 10 : 15;
   const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
 
   // 主题与更新监听
@@ -146,8 +147,8 @@ function App() {
               onVideoLoadedData={handleVideoLoadedData}
           />
 
-          {shouldShowTitleBar && <div className="relative z-50"><TitleBar /></div>}
-          {isWindows && !showTitleBar && (
+          {uiConfig.titleBar && shouldShowTitleBar && <div className="relative z-50"><TitleBar /></div>}
+          {uiConfig.titleBar && isWindows && !showTitleBar && (
               <div data-tauri-drag-region className="absolute top-0 right-0 left-0 z-50 h-9 flex items-center justify-end pr-2">
                 <WindowControls />
               </div>
@@ -200,7 +201,7 @@ function App() {
                     userInfo={userInfo}
                 />
                 <div className="flex-1 flex flex-col overflow-hidden relative">
-                  {isMacOS && !showTitleBar && <div data-tauri-drag-region className="h-8 flex-shrink-0 w-full" />}
+                  {isMacOS && uiConfig.titleBar && !showTitleBar && <div data-tauri-drag-region className="h-8 flex-shrink-0 w-full" />}
                   <div className={`flex-1 overflow-auto px-6 pb-6 md:px-8 md:pb-8 ${shouldPadTop ? "pt-4 md:pt-6" : "pt-0"}`}>
                     <div className="max-w-6xl mx-auto w-full h-full flex flex-col">{content}</div>
                   </div>
@@ -209,7 +210,7 @@ function App() {
           )}
         </div>
 
-        <AntivirusWarningDialog isOpen={showAntivirusWarning} onClose={() => setShowAntivirusWarning(false)} onConfirm={() => setActiveTab("settings")} />
+        {uiConfig.antivirusWarningDialog && <AntivirusWarningDialog isOpen={showAntivirusWarning} onClose={() => setShowAntivirusWarning(false)} onConfirm={() => setActiveTab("settings")} />}
         <CloseConfirmDialog
             isOpen={showCloseConfirmDialog}
             onClose={() => setShowCloseConfirmDialog(false)}

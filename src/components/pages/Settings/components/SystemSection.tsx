@@ -9,6 +9,7 @@ import {
   ItemActions,
   ItemSeparator,
 } from "@/components/ui/item";
+import { uiConfig } from "@/fnos-ui-config";
 
 interface SystemSectionProps {
   autostartEnabled: boolean;
@@ -50,35 +51,39 @@ export function SystemSection({
         <span>系统</span>
       </div>
       <div className="rounded-lg bg-card overflow-hidden">
-        <Item variant="outline" className="border-0">
-          <ItemContent>
-            <ItemTitle>开机自启</ItemTitle>
-            <ItemDescription className="text-xs">
-              系统启动时自动运行应用
-            </ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <button
-              onClick={() => onToggleAutostart(!autostartEnabled)}
-              disabled={autostartLoading}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
-                autostartEnabled
-                  ? "bg-foreground"
-                  : "bg-muted dark:bg-foreground/12"
-              } ${autostartLoading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-              role="switch"
-              aria-checked={autostartEnabled}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
-                  autostartEnabled ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
-          </ItemActions>
-        </Item>
+        {uiConfig.autostart && (
+          <>
+            <Item variant="outline" className="border-0">
+              <ItemContent>
+                <ItemTitle>开机自启</ItemTitle>
+                <ItemDescription className="text-xs">
+                  系统启动时自动运行应用
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <button
+                  onClick={() => onToggleAutostart(!autostartEnabled)}
+                  disabled={autostartLoading}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
+                    autostartEnabled
+                      ? "bg-foreground"
+                      : "bg-muted dark:bg-foreground/12"
+                  } ${autostartLoading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                  role="switch"
+                  aria-checked={autostartEnabled}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
+                      autostartEnabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </ItemActions>
+            </Item>
 
-        <ItemSeparator />
+            <ItemSeparator />
+          </>
+        )}
 
         <Item variant="outline" className="border-0">
           <ItemContent>
@@ -109,34 +114,38 @@ export function SystemSection({
 
         <ItemSeparator />
 
-        <Item variant="outline" className="border-0">
-          <ItemContent>
-            <ItemTitle>关闭窗口时最小化到托盘</ItemTitle>
-            <ItemDescription className="text-xs">
-              关闭窗口后应用在后台运行，可从系统托盘打开
-            </ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            <button
-              onClick={() => onToggleCloseToTray(!closeToTrayEnabled)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
-                closeToTrayEnabled
-                  ? "bg-foreground"
-                  : "bg-muted dark:bg-foreground/12"
-              } cursor-pointer`}
-              role="switch"
-              aria-checked={closeToTrayEnabled}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
-                  closeToTrayEnabled ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
-          </ItemActions>
-        </Item>
+        {uiConfig.closeToTray && (
+          <>
+            <Item variant="outline" className="border-0">
+              <ItemContent>
+                <ItemTitle>关闭窗口时最小化到托盘</ItemTitle>
+                <ItemDescription className="text-xs">
+                  关闭窗口后应用在后台运行，可从系统托盘打开
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <button
+                  onClick={() => onToggleCloseToTray(!closeToTrayEnabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
+                    closeToTrayEnabled
+                      ? "bg-foreground"
+                      : "bg-muted dark:bg-foreground/12"
+                  } cursor-pointer`}
+                  role="switch"
+                  aria-checked={closeToTrayEnabled}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
+                      closeToTrayEnabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </ItemActions>
+            </Item>
 
-        <ItemSeparator />
+            <ItemSeparator />
+          </>
+        )}
 
         <Item variant="outline" className="border-0">
           <ItemContent>

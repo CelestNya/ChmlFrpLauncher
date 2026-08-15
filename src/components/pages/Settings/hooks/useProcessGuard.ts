@@ -5,8 +5,11 @@ import { toast } from "sonner";
 export function useProcessGuard() {
   const [guardEnabled, setGuardEnabled] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
+    // fnOS 适配：守护默认开启（与 useAppInitialization 一致）；桌面版默认关闭
+    const isFnos =
+      (window as unknown as { __FNOS__?: boolean }).__FNOS__ === true;
     const stored = localStorage.getItem("processGuardEnabled");
-    return stored === "true";
+    return stored === "true" || (isFnos && stored === null);
   });
 
   const [guardLoading, setGuardLoading] = useState(false);

@@ -64,6 +64,16 @@ export function useBackgroundImage() {
   }, [intervalTime]);
 
   const handleSelectFolder = async () => {
+    // fnOS（ADR-0004）：砍轮播——文件夹导入（webkitdirectory 多图 base64 塞
+    // localStorage）是配额压力源。fnOS 只支持单图（handleSelectBackgroundImage）。
+    const isFnOS =
+      typeof window !== "undefined" &&
+      Boolean((window as unknown as { __FNOS__?: boolean }).__FNOS__);
+    if (isFnOS) {
+      toast.info("fnOS 版暂不支持文件夹轮播，请选择单张图片");
+      return;
+    }
+
     try {
       const selected = await open({
         directory: true,
@@ -113,6 +123,20 @@ export function useBackgroundImage() {
         setPlaylist([]);
         setIntervalTime(0);
         setCurrentIndex(0);
+
+        // fnOS（ADR-0004）：shim 的 dialog.open 已把选图上传 daemon
+        // （save_background_image），返回 /assets/backgrounds/<file> 托管 URL；
+        // getBackgroundType 识别非 data:/app:// 前缀直接当 src 渲染。
+        const isFnOS =
+          typeof window !== "undefined" &&
+          Boolean(
+            (window as unknown as { __FNOS__?: boolean }).__FNOS__,
+          );
+        if (isFnOS) {
+          setBackgroundImage(filePath);
+          toast.success("背景设置成功");
+          return;
+        }
 
         const isVideo = isVideoFile(filePath);
         const command = isVideo

@@ -51,6 +51,11 @@ export function useTunnelNotifications(activeTab: string) {
       const skipNotifications = activeTab === "tunnels";
 
       for (const log of newLogs) {
+        // fnOS：daemon 断线重连补发的历史帧（replay）只恢复日志显示，
+        // 不触发 toast/音效/launcher 日志等通知（防页面重载后旧事件重复打扰）
+        if (log.replay) {
+          continue;
+        }
         const tunnelId = log.tunnel_id;
         const message = log.message;
         const hasLauncherSuccessLog = logs.some(

@@ -14,6 +14,7 @@ import type { ThemeMode, SidebarMode } from "../types";
 import type { EffectType } from "../utils";
 import { getBackgroundType } from "../utils";
 import React, { type RefObject } from "react";
+import { uiConfig } from "@/fnos-ui-config";
 
 interface AppearanceSectionProps {
   isMacOS: boolean;
@@ -223,7 +224,7 @@ export function AppearanceSection({isMacOS,
             </ItemActions>
           </Item>
 
-          {(isMacOS || isWindows) && sidebarMode === "classic" && (
+          {(isMacOS || isWindows) && sidebarMode === "classic" && uiConfig.titleBar && (
               <>
                 <ItemSeparator />
                 <Item variant="outline" className="border-0">
@@ -283,6 +284,7 @@ export function AppearanceSection({isMacOS,
                       >
                         选择文件
                       </Button>
+                      {uiConfig.backgroundFolderImport && (
                       <Button
                           onClick={onSelectFolder}
                           disabled={isSelectingImage}
@@ -292,6 +294,7 @@ export function AppearanceSection({isMacOS,
                       >
                         选择文件夹
                       </Button>
+                      )}
                     </>
                 ) : (
                     <Button

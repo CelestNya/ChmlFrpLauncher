@@ -1,11 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn, type Event } from "@tauri-apps/api/event";
 import { getNodeUdpSupport, type Tunnel } from "./api";
+import { logStore} from "@/services/logStore";
 
 export interface LogMessage {
   tunnel_id: number;
   message: string;
   timestamp: string;
+  /** fnOS：daemon 断线重连补发的历史帧标记（桌面版无此字段，恒 undefined） */
+  replay?: boolean;
 }
 
 export interface TunnelConfig {
@@ -105,7 +108,42 @@ export class FrpcManager {
       kcp_optimization: kcpOptimization,
     };
 
-    return await invoke<string>("start_frpc", { config });
+    try {
+      return await invoke<string>("start_frpc", { config });
+    } catch (error: unknown) {
+      // 将 error 转换为字符串
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // 检测是否与文件缺失相关
+      const isFileMissing =
+          errorMsg.includes("ENOENT") ||
+          errorMsg.includes("找不到") ||
+          errorMsg.includes("No such file") ||
+          errorMsg.includes("frpc") ||
+          errorMsg.includes("无法启动") ||
+          errorMsg.includes("未找到");
+
+      if (isFileMissing) {
+        const timestamp = new Date()
+            .toLocaleString("zh-CN", {
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              hour12: false,
+            })
+            .replace(/\//g, "/");
+
+        logStore.addLog({
+          tunnel_id: tunnel.id,
+          message: `[E] [ChmlFrpLauncher] 启动失败：frpc 可执行文件不存在，frpc 客户端可能被杀毒软件（如WindowsDefender）误判为可疑程序。`,
+          timestamp,
+        });
+      }
+      throw error;
+    }
   }
 
   async stopTunnel(tunnelId: number): Promise<string> {
@@ -164,7 +202,10 @@ export class FrpcManager {
     this.unlisten = await listen<LogMessage>(
       "frpc-log",
       (event: Event<LogMessage>) => {
-        onLog(event.payload);
+        // fnOS shim 在事件帧上附加 replay 标记（补发历史），透传给消费方
+        const replay =
+          (event as unknown as { replay?: boolean }).replay === true;
+        onLog({ ...event.payload, replay });
       },
     );
   }
