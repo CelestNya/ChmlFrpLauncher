@@ -42,23 +42,24 @@ jobs:
           ref: patcher
           fetch-depth: 0
 
-      - name: Sync upstream develop baseline
+      - name: Sync upstream v0.7.5 baseline
         run: |
           git remote add upstream https://github.com/TechCat-Team/ChmlFrpLauncher.git
-          git fetch upstream develop
+          # v0.7.5 tag 用 refspec 映射到独立 ref（避免与 fork 自带 tag 冲突）
+          git fetch upstream refs/tags/v0.7.5:refs/remotes/upstream/v0.7.5
           git fetch origin main
-          # D3：不变式 CI 化——fork main 的 src/ 必须与上游 develop 一致（0 侵入），
+          # D3：不变式 CI 化——fork main 的 src/ 必须与上游 v0.7.5 一致（0 侵入），
           # 不一致则 patch 基线错乱，显式失败而非靠人工维持
-          if ! git diff --quiet upstream/develop origin/main -- src/; then
-            echo "❌ fork main 的 src/ 与上游 develop 不一致，请先同步 main（rebase --onto）" >&2
+          if ! git diff --quiet upstream/v0.7.5 origin/main -- src/; then
+            echo "❌ fork main 的 src/ 与上游 v0.7.5 不一致，请先同步 main（rebase --onto）" >&2
             exit 1
           fi
-          echo "上游 develop 基线: $(git rev-parse --short upstream/develop)"
-          echo "fork main 基线:    $(git rev-parse --short origin/main)"
+          echo "上游 v0.7.5 基线: $(git rev-parse --short upstream/v0.7.5)"
+          echo "fork main 基线:   $(git rev-parse --short origin/main)"
 
       - name: Generate patches
         run: |
-          BASE=upstream/develop bash fnos-pack/gen-patch.sh
+          BASE=upstream/v0.7.5 bash fnos-pack/gen-patch.sh
           echo "=== patch 变更 ==="
           git status --short fnos-pack/patches/
 
@@ -97,7 +98,7 @@ jobs:
           git push origin "$BRANCH" --force
 
           # 若同源 PR 已存在则刷新 body 后跳过（幂等；--head 需带仓库前缀否则匹配不到）
-          PR_BODY="由 patcher 分支自动生成的 fnOS 前端 patch 更新。来源: patcher@$(git rev-parse --short patcher)，基线: 上游 develop@$(git rev-parse --short upstream/develop)。仅改动 fnos-pack/patches/（+ gen-patch.sh），不涉及 src/。请 review 后合并。"
+          PR_BODY="由 patcher 分支自动生成的 fnOS 前端 patch 更新。来源: patcher@$(git rev-parse --short patcher)，基线: 上游 v0.7.5@$(git rev-parse --short upstream/v0.7.5)。仅改动 fnos-pack/patches/（+ gen-patch.sh），不涉及 src/。请 review 后合并。"
           EXISTING=$(gh pr list --repo CelestNya/ChmlFrpLauncher --head "$BRANCH" --state open --json number -q '.[0].number' || true)
           if [ -n "$EXISTING" ]; then
             # D2：body 曾永远停留在首次创建模板（基线 SHA 过期误导 reviewer），

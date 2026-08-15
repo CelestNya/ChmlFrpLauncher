@@ -4,10 +4,10 @@
 #
 # 用法（patcher 分支，仓库根目录执行）:
 #   bash fnos-pack/gen-patch.sh            # 用 origin/main（fork 主分支）作基线
-#   BASE=upstream/develop bash fnos-pack/gen-patch.sh   # CI 用上游 develop 作基线
+#   BASE=upstream/v0.7.5 bash fnos-pack/gen-patch.sh   # CI 用上游 v0.7.5 作基线（LTS）
 #
-# 基线 = fork 主分支（其 src/ 与上游 develop 一致，0 侵入不变式）。
-# CI 中显式传 BASE=upstream/develop 作防御（防止 fork main 意外被污染 src/）。
+# 基线 = fork 主分支（其 src/ 与上游 v0.7.5 一致，0 侵入不变式）。
+# CI 中显式传 BASE=upstream/v0.7.5 作防御（防止 fork main 意外被污染 src/）。
 # 生成前建议先 git fetch，保证 patch 基于最新上游，上游改动与 fnOS 改动的冲突提前暴露。
 #
 # 产出两个全量 patch（从干净上游可应用，幂等覆盖）：
