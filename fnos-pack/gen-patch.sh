@@ -64,9 +64,12 @@ echo "  fnos-feature-patch.patch  ($(grep -c '^---' "$PATCH_DIR/fnos-feature-pat
 
 # E6：差异完整性自检——src/ 相对基线的全部差异必须被登记清单覆盖
 #（useTunnelProgress 教训：漏登记 = 修复不进产物且 dry-run 自检仍通过）。
-# *.test.ts 豁免：测试文件是 patcher 独有（不进 patch、不进构建产物，main 保持 0 侵入）。
+# 豁免：
+#   *.test.ts —— 测试文件是 patcher 独有（不进 patch、不进构建产物，main 保持 0 侵入）
+#   src/fnos-ui-config.ts —— 生成文件（adapter manifest 驱动，apply-patches.sh 生成覆盖，不进 patch）
 UNREGISTERED="$(git diff --name-only "$BASE" -- src/ \
     | grep -v '\.test\.ts$' \
+    | grep -v '^src/fnos-ui-config\.ts$' \
     | grep -vxF -f <(printf '%s\n' "${UI_FILES[@]}" "${FEATURE_FILES[@]}") || true)"
 if [ -n "$UNREGISTERED" ]; then
     echo "[gen-patch] ❌ src/ 存在未登记的差异文件（漏 patch！须加入 UI_FILES/FEATURE_FILES）:" >&2

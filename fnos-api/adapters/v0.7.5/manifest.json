@@ -45,8 +45,7 @@
     "uiCrop": [
       "src/App.tsx",
       "src/components/pages/Settings/components/AppearanceSection.tsx",
-      "src/components/pages/Settings/components/SystemSection.tsx",
-      "src/components/pages/Settings/index.tsx"
+      "src/components/pages/Settings/components/SystemSection.tsx"
     ],
     "featureBranch": [
       "src/components/pages/Settings/hooks/useBackgroundImage.ts",
@@ -59,7 +58,19 @@
       "src/services/frpcManager.ts",
       "src/lib/sound.ts"
     ],
-    "total": 13
+    "total": 12
+  },
+
+  "uiConfig": {
+    "schemaVersion": 1,
+    "description": "fnOS UI 裁剪配置（patch 消费；false = 该 UI 元素在 fnOS 上隐藏）。统一格式由 adapter 包圆，patch 的 feat 增删只影响引用哪些配置项，不改格式。",
+    "values": {
+      "titleBar": false,
+      "antivirusWarningDialog": false,
+      "autostart": false,
+      "closeToTray": false,
+      "backgroundFolderImport": false
+    }
   },
 
   "versioning": {

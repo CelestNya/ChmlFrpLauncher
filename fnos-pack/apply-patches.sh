@@ -58,16 +58,28 @@ patch -p1 -d "$TMP_WORK" < "$PATCH_FILE"
 patch -p1 -d "$TMP_WORK" < "$FEATURE_PATCH_FILE"
 echo "[fnos-pack] ✅ patch 应用成功（ui + feature）"
 
-# 验证：fnOS 已移除的元素不应再出现在源码副本中；保留元素应仍在
-if grep -q "TitleBar" "$TMP_WORK/src/App.tsx"; then
-  echo "[fnos-pack] ❌ App.tsx 仍引用 TitleBar" >&2
+# 生成 fnOS UI 配置（adapter manifest 唯一权威；覆盖 patcher 手写版，保证构建产物与契约一致）
+echo "[fnos-pack] 生成 fnOS UI 配置（adapter manifest）…"
+node "$REPO_ROOT/fnos-api/generate-ui-config.mjs" --out "$TMP_WORK/src/fnos-ui-config.ts"
+if [ ! -s "$TMP_WORK/src/fnos-ui-config.ts" ]; then
+  echo "[fnos-pack] ❌ fnos-ui-config.ts 生成失败" >&2
   exit 1
 fi
-if grep -q "AntivirusWarningDialog" "$TMP_WORK/src/App.tsx"; then
-  echo "[fnos-pack] ❌ App.tsx 仍引用 AntivirusWarningDialog" >&2
+
+# 验证：UI 裁剪已配置化（条件渲染由 adapter manifest 生成的 uiConfig 驱动）
+if ! grep -q "uiConfig" "$TMP_WORK/src/App.tsx"; then
+  echo "[fnos-pack] ❌ App.tsx 未引用 uiConfig（UI 裁剪配置化未生效）" >&2
   exit 1
 fi
-echo "[fnos-pack] ✅ UI 精简验证通过（TitleBar / 杀软警告已移除）"
+if grep -q "titleBar: true" "$TMP_WORK/src/fnos-ui-config.ts"; then
+  echo "[fnos-pack] ❌ uiConfig.titleBar 为 true（TitleBar 未裁剪）" >&2
+  exit 1
+fi
+if grep -q "antivirusWarningDialog: true" "$TMP_WORK/src/fnos-ui-config.ts"; then
+  echo "[fnos-pack] ❌ uiConfig.antivirusWarningDialog 为 true（杀软警告未裁剪）" >&2
+  exit 1
+fi
+echo "[fnos-pack] ✅ UI 精简验证通过（uiConfig 配置驱动：TitleBar / 杀软警告已裁剪）"
 
 # 验证 feature patch 关键修复已应用（fnOS 专属逻辑存在性）
 if ! grep -q "__FNOS__" "$TMP_WORK/src/components/pages/Settings/hooks/useBackgroundImage.ts"; then

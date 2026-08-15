@@ -1,251 +1,111 @@
 diff --git a/src/App.tsx b/src/App.tsx
-index 16f2a5b..13d34f3 100644
+index 16f2a5b..1b0746f 100644
 --- a/src/App.tsx
 +++ b/src/App.tsx
-@@ -1,19 +1,16 @@
- import { useState, useRef, useCallback, useEffect, useMemo } from "react";
- import { Sidebar } from "@/components/Sidebar";
--import { TitleBar, WindowControls } from "@/components/TitleBar";
- import { Home } from "@/components/pages/Home";
- import { TunnelList } from "@/components/pages/TunnelList";
- import { Logs } from "@/components/pages/Logs";
- import { Settings } from "@/components/pages/Settings";
- import { getStoredUser, fetchUserInfo, type StoredUser, type UserInfo } from "@/services/api";
--import { AntivirusWarningDialog } from "@/components/dialogs/AntivirusWarningDialog";
- import { CloseConfirmDialog } from "@/components/dialogs/CloseConfirmDialog";
- import { UpdateDialog } from "@/components/dialogs/UpdateDialog";
- import { useAppTheme } from "@/components/App/hooks/useAppTheme";
- import { useWindowEvents } from "@/components/App/hooks/useWindowEvents";
- import { useAppInitialization } from "@/components/App/hooks/useAppInitialization";
- import { useTunnelNotifications } from "@/components/App/hooks/useTunnelNotifications";
--import { useTitleBar } from "@/components/App/hooks/useTitleBar";
- import { useBackground } from "@/components/App/hooks/useBackground";
- import { useDeepLink } from "@/components/App/hooks/useDeepLink";
- import { useFrpcDownload } from "@/components/App/hooks/useFrpcDownload";
-@@ -40,9 +37,6 @@ function App() {
-   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => initialSidebarMode);
-   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => initialSidebarMode !== "classic");
+@@ -25,6 +25,7 @@ import { BackgroundLayer } from "@/components/App/components/BackgroundLayer";
+ import { getInitialSidebarMode } from "@/components/pages/Settings/utils";
+ import type { SidebarMode } from "@/components/pages/Settings/types";
+ import { cn } from "@/lib/utils";
++import { uiConfig } from "@/fnos-ui-config";
  
--  const isMacOS = typeof navigator !== "undefined" && navigator.platform.toUpperCase().indexOf("MAC") >= 0;
--  const isWindows = typeof navigator !== "undefined" && navigator.platform.toUpperCase().indexOf("WIN") >= 0;
--
-   // 其他功能 Hooks
-   useAppTheme();
-   useAppInitialization();
-@@ -50,15 +44,12 @@ function App() {
-   useDeepLink(user);
-   useTunnelNotifications(activeTab);
-   const { showCloseConfirmDialog, setShowCloseConfirmDialog } = useWindowEvents();
--  const { showTitleBar } = useTitleBar();
+ function App() {
+   const [activeTab, setActiveTab] = useState("home");
+@@ -54,11 +55,11 @@ function App() {
    const { updateInfo, setUpdateInfo } = useUpdateCheck();
--  const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
-+  // fnOS：杀软警告对话框移除；hook 保留以维持 frpc 自动下载兜底
-+  useFrpcDownload();
+   const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
  
 -  // 常量计算
 -  const shouldShowTitleBar = isMacOS ? showTitleBar : isWindows ? showTitleBar : true;
 -  const isTitleBarHidden = (isMacOS || isWindows) && !showTitleBar;
 -  const shouldPadTop = shouldShowTitleBar || (isWindows && !showTitleBar);
 -  const SIDEBAR_LEFT = isMacOS && !showTitleBar ? 10 : 15;
-+  // 常量计算（fnOS：无原生标题栏，侧边栏固定左间距）
-+  const SIDEBAR_LEFT = 15;
++  // 常量计算（fnOS：uiConfig 裁剪标题栏相关 UI，平台分支随配置关闭）
++  const shouldShowTitleBar = uiConfig.titleBar ? (isMacOS ? showTitleBar : isWindows ? showTitleBar : true) : false;
++  const isTitleBarHidden = uiConfig.titleBar && (isMacOS || isWindows) && !showTitleBar;
++  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : false;
++  const SIDEBAR_LEFT = uiConfig.titleBar && isMacOS && !showTitleBar ? 10 : 15;
    const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
  
    // 主题与更新监听
-@@ -146,20 +137,13 @@ function App() {
+@@ -146,8 +147,8 @@ function App() {
                onVideoLoadedData={handleVideoLoadedData}
            />
  
 -          {shouldShowTitleBar && <div className="relative z-50"><TitleBar /></div>}
 -          {isWindows && !showTitleBar && (
--              <div data-tauri-drag-region className="absolute top-0 right-0 left-0 z-50 h-9 flex items-center justify-end pr-2">
--                <WindowControls />
--              </div>
--          )}
--
-           {(sidebarMode === "floating" || sidebarMode === "floating_fixed") ? (
-               <>
-                 <div
-                     className="absolute z-50"
-                     style={{
-                       left: `${SIDEBAR_LEFT}px`,
--                      top: isTitleBarHidden ? (isMacOS ? "10px" : "12px") : "48px",
-+                      top: "12px",
-                       bottom: "12px",
-                     }}
-                 >
-@@ -180,7 +164,7 @@ function App() {
-                     style={{
-                       left: `${SIDEBAR_LEFT + SIDEBAR_COLLAPSED_WIDTH}px`,
-                       right: "0",
--                      top: shouldPadTop ? "36px" : "0",
-+                      top: "0",
-                       bottom: "0",
-                     }}
-                 >
-@@ -200,8 +184,7 @@ function App() {
++          {uiConfig.titleBar && shouldShowTitleBar && <div className="relative z-50"><TitleBar /></div>}
++          {uiConfig.titleBar && isWindows && !showTitleBar && (
+               <div data-tauri-drag-region className="absolute top-0 right-0 left-0 z-50 h-9 flex items-center justify-end pr-2">
+                 <WindowControls />
+               </div>
+@@ -200,7 +201,7 @@ function App() {
                      userInfo={userInfo}
                  />
                  <div className="flex-1 flex flex-col overflow-hidden relative">
 -                  {isMacOS && !showTitleBar && <div data-tauri-drag-region className="h-8 flex-shrink-0 w-full" />}
--                  <div className={`flex-1 overflow-auto px-6 pb-6 md:px-8 md:pb-8 ${shouldPadTop ? "pt-4 md:pt-6" : "pt-0"}`}>
-+                  <div className="flex-1 overflow-auto px-6 pb-6 md:px-8 md:pb-8 pt-0">
++                  {isMacOS && uiConfig.titleBar && !showTitleBar && <div data-tauri-drag-region className="h-8 flex-shrink-0 w-full" />}
+                   <div className={`flex-1 overflow-auto px-6 pb-6 md:px-8 md:pb-8 ${shouldPadTop ? "pt-4 md:pt-6" : "pt-0"}`}>
                      <div className="max-w-6xl mx-auto w-full h-full flex flex-col">{content}</div>
                    </div>
-                 </div>
-@@ -209,7 +192,6 @@ function App() {
+@@ -209,7 +210,7 @@ function App() {
            )}
          </div>
  
 -        <AntivirusWarningDialog isOpen={showAntivirusWarning} onClose={() => setShowAntivirusWarning(false)} onConfirm={() => setActiveTab("settings")} />
++        {uiConfig.antivirusWarningDialog && <AntivirusWarningDialog isOpen={showAntivirusWarning} onClose={() => setShowAntivirusWarning(false)} onConfirm={() => setActiveTab("settings")} />}
          <CloseConfirmDialog
              isOpen={showCloseConfirmDialog}
              onClose={() => setShowCloseConfirmDialog(false)}
 diff --git a/src/components/pages/Settings/components/AppearanceSection.tsx b/src/components/pages/Settings/components/AppearanceSection.tsx
-index 69b973d..12588e2 100644
+index 69b973d..69800bd 100644
 --- a/src/components/pages/Settings/components/AppearanceSection.tsx
 +++ b/src/components/pages/Settings/components/AppearanceSection.tsx
-@@ -16,15 +16,11 @@ import { getBackgroundType } from "../utils";
+@@ -14,6 +14,7 @@ import type { ThemeMode, SidebarMode } from "../types";
+ import type { EffectType } from "../utils";
+ import { getBackgroundType } from "../utils";
  import React, { type RefObject } from "react";
++import { uiConfig } from "@/fnos-ui-config";
  
  interface AppearanceSectionProps {
--  isMacOS: boolean;
--  isWindows: boolean;
-   followSystem: boolean;
-   setFollowSystem: (value: boolean) => void;
-   theme: ThemeMode;
-   setTheme: (theme: ThemeMode) => void;
-   isViewTransitionRef: RefObject<boolean>;
--  showTitleBar: boolean;
--  setShowTitleBar: (value: boolean) => void;
-   backgroundImage: string | null;
-   isSelectingImage: boolean;
-   overlayOpacity: number;
-@@ -48,15 +44,11 @@ interface AppearanceSectionProps {
-   setIntervalTime: (time: number) => void;
- }
- 
--export function AppearanceSection({isMacOS,
--                                    isWindows,
--                                    followSystem,
-+export function AppearanceSection({followSystem,
-                                     setFollowSystem,
-                                     theme,
-                                     setTheme,
-                                     isViewTransitionRef,
--                                    showTitleBar,
--                                    setShowTitleBar,
-                                     backgroundImage,
-                                     isSelectingImage,
-                                     overlayOpacity,
-@@ -81,6 +73,10 @@ export function AppearanceSection({isMacOS,
-                                   }: AppearanceSectionProps) {
-   const backgroundType = getBackgroundType(backgroundImage);
-   const isVideo = backgroundType === "video";
-+  // fnOS（ADR-0004）：砍轮播，隐藏文件夹导入入口
-+  const isFnOS =
-+    typeof window !== "undefined" &&
-+    Boolean((window as unknown as { __FNOS__?: boolean }).__FNOS__);
- 
-   const toggleTheme = async (newTheme: ThemeMode, event?: React.MouseEvent) => {
-     if (!document.startViewTransition) {
-@@ -223,40 +219,6 @@ export function AppearanceSection({isMacOS,
+   isMacOS: boolean;
+@@ -223,7 +224,7 @@ export function AppearanceSection({isMacOS,
              </ItemActions>
            </Item>
  
 -          {(isMacOS || isWindows) && sidebarMode === "classic" && (
--              <>
--                <ItemSeparator />
--                <Item variant="outline" className="border-0">
--                  <ItemContent>
--                    <ItemTitle>显示顶部栏</ItemTitle>
--                    <ItemDescription className="text-xs">
--                      {isMacOS
--                          ? "显示顶部标题栏（关闭时，三色按钮将显示在侧边栏顶部）"
--                          : "显示顶部标题栏（关闭时，窗口按钮将显示在右上角空白处）"}
--                    </ItemDescription>
--                  </ItemContent>
--                  <ItemActions>
--                    <button
--                        onClick={() => setShowTitleBar(!showTitleBar)}
--                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
--                            showTitleBar
--                                ? "bg-foreground"
--                                : "bg-muted dark:bg-foreground/12"
--                        } cursor-pointer`}
--                        role="switch"
--                        aria-checked={showTitleBar}
--                    >
--                  <span
--                      className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
--                          showTitleBar ? "translate-x-6" : "translate-x-1"
--                      }`}
--                  />
--                    </button>
--                  </ItemActions>
--                </Item>
--              </>
--          )}
--
-           <ItemSeparator />
- 
-           <Item variant="outline" className="border-0">
-@@ -283,15 +245,18 @@ export function AppearanceSection({isMacOS,
++          {(isMacOS || isWindows) && sidebarMode === "classic" && uiConfig.titleBar && (
+               <>
+                 <ItemSeparator />
+                 <Item variant="outline" className="border-0">
+@@ -283,6 +284,7 @@ export function AppearanceSection({isMacOS,
                        >
                          选择文件
                        </Button>
--                      <Button
-+                      {/* fnOS（ADR-0004）：砍轮播，隐藏文件夹导入入口 */}
-+                      {!isFnOS && (
-+                        <Button
++                      {uiConfig.backgroundFolderImport && (
+                       <Button
                            onClick={onSelectFolder}
                            disabled={isSelectingImage}
-                           size="sm"
-                           variant="outline"
-                           className="h-auto px-3 py-1.5 text-xs"
--                      >
--                        选择文件夹
--                      </Button>
-+                        >
-+                          选择文件夹
-+                        </Button>
+@@ -292,6 +294,7 @@ export function AppearanceSection({isMacOS,
+                       >
+                         选择文件夹
+                       </Button>
 +                      )}
                      </>
                  ) : (
                      <Button
 diff --git a/src/components/pages/Settings/components/SystemSection.tsx b/src/components/pages/Settings/components/SystemSection.tsx
-index ca14adb..e319e30 100644
+index ca14adb..5cf28e8 100644
 --- a/src/components/pages/Settings/components/SystemSection.tsx
 +++ b/src/components/pages/Settings/components/SystemSection.tsx
-@@ -11,13 +11,8 @@ import {
+@@ -9,6 +9,7 @@ import {
+   ItemActions,
+   ItemSeparator,
  } from "@/components/ui/item";
++import { uiConfig } from "@/fnos-ui-config";
  
  interface SystemSectionProps {
--  autostartEnabled: boolean;
--  autostartLoading: boolean;
--  onToggleAutostart: (enabled: boolean) => void;
-   autoCheckUpdate: boolean;
-   onToggleAutoCheckUpdate: (enabled: boolean) => void;
--  closeToTrayEnabled: boolean;
--  onToggleCloseToTray: (enabled: boolean) => void;
-   frpcLogLevel: FrpcLogLevel;
-   onChangeFrpcLogLevel: (value: FrpcLogLevel) => void;
-   guardEnabled: boolean;
-@@ -28,13 +23,8 @@ interface SystemSectionProps {
- }
- 
- export function SystemSection({
--  autostartEnabled,
--  autostartLoading,
--  onToggleAutostart,
-   autoCheckUpdate,
-   onToggleAutoCheckUpdate,
--  closeToTrayEnabled,
--  onToggleCloseToTray,
-   frpcLogLevel,
-   onChangeFrpcLogLevel,
-   guardEnabled,
-@@ -50,36 +40,6 @@ export function SystemSection({
+   autostartEnabled: boolean;
+@@ -50,35 +51,39 @@ export function SystemSection({
          <span>系统</span>
        </div>
        <div className="rounded-lg bg-card overflow-hidden">
@@ -276,13 +136,44 @@ index ca14adb..e319e30 100644
 -            </button>
 -          </ItemActions>
 -        </Item>
--
++        {uiConfig.autostart && (
++          <>
++            <Item variant="outline" className="border-0">
++              <ItemContent>
++                <ItemTitle>开机自启</ItemTitle>
++                <ItemDescription className="text-xs">
++                  系统启动时自动运行应用
++                </ItemDescription>
++              </ItemContent>
++              <ItemActions>
++                <button
++                  onClick={() => onToggleAutostart(!autostartEnabled)}
++                  disabled={autostartLoading}
++                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
++                    autostartEnabled
++                      ? "bg-foreground"
++                      : "bg-muted dark:bg-foreground/12"
++                  } ${autostartLoading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
++                  role="switch"
++                  aria-checked={autostartEnabled}
++                >
++                  <span
++                    className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
++                      autostartEnabled ? "translate-x-6" : "translate-x-1"
++                    }`}
++                  />
++                </button>
++              </ItemActions>
++            </Item>
+ 
 -        <ItemSeparator />
--
++            <ItemSeparator />
++          </>
++        )}
+ 
          <Item variant="outline" className="border-0">
            <ItemContent>
-             <ItemTitle>启动时自动检测更新</ItemTitle>
-@@ -109,35 +69,6 @@ export function SystemSection({
+@@ -109,34 +114,38 @@ export function SystemSection({
  
          <ItemSeparator />
  
@@ -312,87 +203,39 @@ index ca14adb..e319e30 100644
 -            </button>
 -          </ItemActions>
 -        </Item>
--
++        {uiConfig.closeToTray && (
++          <>
++            <Item variant="outline" className="border-0">
++              <ItemContent>
++                <ItemTitle>关闭窗口时最小化到托盘</ItemTitle>
++                <ItemDescription className="text-xs">
++                  关闭窗口后应用在后台运行，可从系统托盘打开
++                </ItemDescription>
++              </ItemContent>
++              <ItemActions>
++                <button
++                  onClick={() => onToggleCloseToTray(!closeToTrayEnabled)}
++                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
++                    closeToTrayEnabled
++                      ? "bg-foreground"
++                      : "bg-muted dark:bg-foreground/12"
++                  } cursor-pointer`}
++                  role="switch"
++                  aria-checked={closeToTrayEnabled}
++                >
++                  <span
++                    className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
++                      closeToTrayEnabled ? "translate-x-6" : "translate-x-1"
++                    }`}
++                  />
++                </button>
++              </ItemActions>
++            </Item>
+ 
 -        <ItemSeparator />
--
++            <ItemSeparator />
++          </>
++        )}
+ 
          <Item variant="outline" className="border-0">
            <ItemContent>
-             <ItemTitle>进程守护</ItemTitle>
-diff --git a/src/components/pages/Settings/index.tsx b/src/components/pages/Settings/index.tsx
-index 820c705..fe2d343 100644
---- a/src/components/pages/Settings/index.tsx
-+++ b/src/components/pages/Settings/index.tsx
-@@ -1,10 +1,8 @@
- import { useState, useEffect, useCallback } from "react";
- import { useTheme } from "./hooks/useTheme";
- import { useBackgroundImage } from "./hooks/useBackgroundImage";
--import { useAutostart } from "./hooks/useAutostart";
- import { useUpdate } from "./hooks/useUpdate";
- import { useFrpcDownload } from "./hooks/useFrpcDownload";
--import { useCloseBehavior } from "./hooks/useCloseBehavior";
- import { useProcessGuard } from "./hooks/useProcessGuard";
- import { useProxy } from "./hooks/useProxy";
- import {
-@@ -30,13 +28,6 @@ import { updateService } from "@/services/updateService";
- import { toast } from "sonner";
- 
- export function Settings() {
--  const isMacOS =
--    typeof navigator !== "undefined" &&
--    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
--  const isWindows =
--    typeof navigator !== "undefined" &&
--    navigator.platform.toUpperCase().indexOf("WIN") >= 0;
--
-   const {
-     followSystem,
-     setFollowSystem,
-@@ -59,9 +50,6 @@ export function Settings() {
-     handleClearBackgroundImage,
-   } = useBackgroundImage();
- 
--  const { autostartEnabled, autostartLoading, handleToggleAutostart } =
--    useAutostart();
--
-   const {
-     autoCheckUpdate,
-     checkingUpdate,
-@@ -77,8 +65,6 @@ export function Settings() {
- 
-   const { isDownloading, handleRedownloadFrpc } = useFrpcDownload();
- 
--  const { closeToTrayEnabled, handleToggleCloseToTray } = useCloseBehavior();
--
-   const { guardEnabled, guardLoading, handleToggleGuard } = useProcessGuard();
- 
-   const { proxyConfig, updateProxyConfig } = useProxy();
-@@ -208,15 +194,11 @@ export function Settings() {
- 
-       <div className="flex-1 overflow-auto space-y-6">
-         <AppearanceSection
--          isMacOS={isMacOS}
--          isWindows={isWindows}
-           followSystem={followSystem}
-           setFollowSystem={setFollowSystem}
-           theme={theme}
-           setTheme={setTheme}
-           isViewTransitionRef={isViewTransitionRef}
--          showTitleBar={showTitleBar}
--          setShowTitleBar={setShowTitleBar}
-           backgroundImage={backgroundImage}
-           isSelectingImage={isSelectingImage}
-           overlayOpacity={overlayOpacity}
-@@ -248,13 +230,8 @@ export function Settings() {
-         />
- 
-         <SystemSection
--          autostartEnabled={autostartEnabled}
--          autostartLoading={autostartLoading}
--          onToggleAutostart={handleToggleAutostart}
-           autoCheckUpdate={autoCheckUpdate}
-           onToggleAutoCheckUpdate={handleToggleAutoCheckUpdate}
--          closeToTrayEnabled={closeToTrayEnabled}
--          onToggleCloseToTray={handleToggleCloseToTray}
-           frpcLogLevel={frpcLogLevel}
-           onChangeFrpcLogLevel={setFrpcLogLevel}
-           guardEnabled={guardEnabled}
