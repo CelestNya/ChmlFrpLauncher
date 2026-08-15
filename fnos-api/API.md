@@ -115,9 +115,37 @@ apiVersion: 1.0.0
 | /api/update/check\|download\|apply | GET/POST | 自更新 |
 | /assets/backgrounds/* | GET | 壁纸静态托管 |
 
-## 八、UI 适配面（13 文件清单，脆弱）
+## 八、UI 适配面（12 文件清单，脆弱）
 
 见 `fnos-pack/adapters/<version>/manifest.json` 的 `uiFiles` 字段（每个 adapter 声明自己需要覆盖哪些文件）。
+
+### 8.1 UI 裁剪配置（uiConfig，统一格式）
+
+**adapter 做裁剪实现**（2026-08-15 用户决策）：manifest 的 `uiConfig.values` 暴露统一格式配置项，
+patch 代码消费配置做**条件渲染**（不再硬删代码）。patch 因 feat 增删配置只影响「引用哪些配置项」，
+不改 adapter 格式（统一格式先包圆）。
+
+| 配置项 | 控制的 UI | 当前值 (v0.7.5) |
+|--------|-----------|-----------------|
+| `titleBar` | App.tsx TitleBar/WindowControls + 显示顶部栏设置项 | `false` |
+| `antivirusWarningDialog` | 杀软警告弹窗 | `false` |
+| `autostart` | 开机自启设置项 | `false` |
+| `closeToTray` | 关闭时最小化到托盘设置项 | `false` |
+| `backgroundFolderImport` | 背景「选择文件夹」按钮 | `false` |
+
+**消费链路**：
+```
+adapter manifest uiConfig.values（唯一权威）
+    ↓ fnos-api/generate-ui-config.mjs（构建时生成）
+src/fnos-ui-config.ts（export const uiConfig = {...} as const）
+    ↓ patch 代码 import + 条件渲染（{uiConfig.titleBar && <TitleBar/>}）
+产物 dist
+```
+
+**约束**：
+- 新增裁剪点：manifest `uiConfig.values` 加键 → patch 消费 → `verify-adapter.sh` 校验（引用键 ⊆ 定义键）
+- `src/fnos-ui-config.ts` 是生成文件（E6 豁免不进 patch、不进 main，构建时生成覆盖 patcher 手写版）
+- 手写版与 manifest 不一致 → verify-adapter.sh 报错（manifest 唯一权威）
 
 ## 九、契约维护规则
 

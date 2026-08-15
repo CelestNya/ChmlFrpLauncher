@@ -45,11 +45,14 @@ fnOS 适配实现
 
 - **能力清单双保险**（版本号 + 能力清单交集校验）：用户判定「不应该出现这类疏漏」（版本号声明已足够严谨），避免多一层清单维护
 - **diff patch 承载全部**：保持脆弱性，不做
-- **运行时 DOM 裁剪（B 路）**：前期讨论过，UI 裁剪仍走 mod 文件（构建期覆盖），保留 shim 运行时作为补充
+- **运行时 DOM 裁剪**：否决；实际采用 **adapter 配置驱动条件渲染**（2026-08-15 用户决策）——
+  adapter manifest `uiConfig.values` 暴露统一格式配置项，patch 消费做 JSX 条件渲染，
+  构建时注入配置（`generate-ui-config.mjs`），非运行时 DOM 操作
 
 ## 落地物
 
 - `fnos-api/API.md` —— 契约人读版（六面：命令/事件/插件/存储/HTTP/UI）
-- `fnos-api/adapters/v0.7.5/manifest.json` —— 第一个 adapter（能力面 42 implemented + 9 noop，UI 13 文件）
-- `fnos-api/verify-adapter.sh` —— 能力覆盖校验（前端调用 ⊆ adapter 能力面）
+- `fnos-api/adapters/v0.7.5/manifest.json` —— 第一个 adapter（能力面 42 implemented + 9 noop，UI 12 文件 + uiConfig 5 配置项）
+- `fnos-api/verify-adapter.sh` —— 能力覆盖校验（前端调用 ⊆ adapter 能力面 + uiConfig 键覆盖）
+- `fnos-api/generate-ui-config.mjs` —— 从 manifest 生成前端配置模块（构建链调用）
 - 校验结果：前端 33 个实际调用命令全部覆盖 ✅
