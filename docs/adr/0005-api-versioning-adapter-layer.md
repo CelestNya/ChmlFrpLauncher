@@ -53,6 +53,22 @@ fnOS 适配实现
 
 - `fnos-api/API.md` —— 契约人读版（六面：命令/事件/插件/存储/HTTP/UI）
 - `fnos-api/adapters/v0.7.5/manifest.json` —— 第一个 adapter（能力面 42 implemented + 9 noop，UI 12 文件 + uiConfig 5 配置项）
-- `fnos-api/verify-adapter.sh` —— 能力覆盖校验（前端调用 ⊆ adapter 能力面 + uiConfig 键覆盖）
+- `fnos-api/verify-adapter.sh` —— 能力覆盖校验（前端调用 ⊆ adapter 能力面 + uiConfig 键覆盖 + patch 依赖校验）
 - `fnos-api/generate-ui-config.mjs` —— 从 manifest 生成前端配置模块（构建链调用）
 - 校验结果：前端 33 个实际调用命令全部覆盖 ✅
+
+## 分支矩阵拓扑（2026-08-15 增补）
+
+版本组合用 **git 分支**承载（三套代码生命周期分离）：
+
+```
+main ────────── 发布组合态：src（0 侵入，= adapter 声明的 upstream.ref）+ docs + CI
+adapter/<ver> ── fnos-api 契约（每上游版本一个分支，upstream.ref 确定 src 基线）
+patch ────────── 业务实现（patches/ + daemon + shim + 构建链，不含 src）
+```
+
+- **构建组合**：CI（fnos-build workflow_dispatch）选 adapter + patch 分支 → checkout 目录 → 0 侵入验证 → verify（patch requires.api ≤ adapter apiVersion 强制）→ apply-patches → build-fpk
+- **src 根据 adapter 版本确定**：adapter manifest 的 `upstream.ref` 是唯一基线来源
+- **patch 开发只关注 API 面**：patch 分支不含上游 src，开发/构建时由组合工作区提供基线（Linux patchset 模式）
+- **版本号**：adapter 联合版本号（`{基线}-{apiVersion}`）、patch 单特性版本号（`featureVersion` + `requires.api`）
+- 迁移：patcher 分支职责并入 patch 分支（原双分支模型废弃）

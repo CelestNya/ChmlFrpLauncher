@@ -1,53 +1,66 @@
 # ChmlFrpLauncher 开发文档（fnOS 移植）
 
-> 最后更新：2026-08-13
-> 本文件是**开发须知**：双分支工作流、构建链、patch 机制、NAS 部署、测试、发版策略。
+> 最后更新：2026-08-15
+> 本文件是**开发须知**：分支矩阵工作流、构建链、patch 机制、NAS 部署、测试、发版策略。
 > 架构状态见 `docs/architecture.md`（反映代码状态）；交接状态见 `docs/handoff.md`（随代码更新）。
 > 一次性实施计划（B1-B5）已归档，见 git 历史与临时目录，不再占仓库位置。
 
 ---
 
-## 一、双分支工作流
+## 一、分支矩阵工作流（2026-08-15 用户决策）
+
+**分支矩阵拓扑**：三套代码按生命周期分三组分支，构建时组合：
 
 ```
-main ──── 纯净上游 + patch 文件 + 构建链（apply-patches.sh / build-fpk.sh / gen-patch.sh / CI）
-              ↑ PR（仅 patches/ 目录，CI 自动开）
-patcher ── main + src/ 上的侵入式 fnOS 改动（开发态）
+main ──────────── 发布组合态：src（0 侵入，= adapter 声明的上游基线）+ docs + CI + 根文件
+adapter/<ver> ──── 每上游版本一个：fnos-api 契约（API.md + manifest + 校验/生成脚本）
+                    adapterVersion = {基线版本}-{apiVersion}（如 0.7.5-1.0.0）
+patch ──────────── fnOS 业务实现：patches/*.patch + manifest（featureVersion + requires.api）
+                    + fnos-daemon + fnos-shim + 构建链（不含 src）
 ```
 
-| 分支 | src/ 状态 | 用途 |
+| 分支 | 内容 | 生命周期 |
 |---|---|---|
-| `main` | 零改动（0 侵入），内容 = 上游 develop + fnos 附加文件 | 发布态：CI 构建 .fpk 时在临时副本应用 patch |
-| `patcher` | 含全部 fnOS 改动（11 文件） | 开发态：改 fnOS 前端功能直接改这里 |
+| `main` | src/ 零改动（0 侵入）+ docs + CI | 发布组合态，随上游基线更新 |
+| `adapter/v0.7.5`（每上游版本） | 仅 fnos-api/（4 文件） | 随上游版本生灭；`upstream.ref` 声明 src 基线 |
+| `patch` | fnos-pack/ + fnos-daemon/ + fnos-shim/ | 随 feat 演进；featureVersion 独立 |
 
-> **基线**：上游活跃开发分支是 `develop`（v0.8.0 WIP），发布才合并进上游 main。
-> fork 基线 = **上游 develop**，main 的 src/ 与之保持一致（0 侵入不变式，patchgen CI 断言
-> `git diff --quiet upstream/develop origin/main -- src/`）。
+> **基线**：当前 LTS = 上游 v0.7.5 tag（2026-08-15 切回，develop 线暂停）。
+> 0 侵入不变式：main 的 src/ 必须与 adapter manifest 声明的 `upstream.ref` 一致
+> （CI 组合时断言 `git diff --quiet upstream/v0.7.5 -- src/`）。
 
-### 日常开发流程（改 fnOS 前端功能）
+### 组合操作（构建/开发的工作区形态）
 
-1. 切到 `patcher` 分支，直接在 `src/` 改 + commit
-2. 本地可选：`bash fnos-pack/gen-patch.sh` 预览产物
-3. `git push origin patcher` → CI 自动生成 patch → 开 PR（仅 patches/ 目录）
-4. review PR 后合并到 main
+```bash
+# 本地组合（main 工作区 = 完整构建环境）
+git checkout main
+git checkout adapter/v0.7.5 -- fnos-api/
+git checkout patch -- fnos-pack/ fnos-daemon/ fnos-shim/
+# 这些目录被 main 的 .gitignore 忽略，不会误提交
+
+# 验证组合（CI 同款）
+bash fnos-api/verify-adapter.sh   # 命令面 + uiConfig 键 + patch 依赖校验
+```
+
+### 日常开发流程（改 fnOS 功能 → patch 分支）
+
+1. 组合工作区下改前端（src/ 应用态）或 daemon/shim
+2. 重新生成 patch（patch 分支不含 src，diff 基线 = adapter 声明的上游 ref）：
+   `BASE=v0.7.5 bash fnos-pack/gen-patch.sh`（工作区 src = 上游 + 改动）
+3. 只提交 patch 分支的产物（fnos-pack/patches/ + daemon + shim），**不提交 src/**
+4. `git push origin patch` → fnos-build CI 组合验证（patch 依赖校验强制）
 
 ### 上游同步（主仓更新时）
 
-**自动跟随（推荐，2026-08-13 新增）**：`fnos-upstream-follow.yml`（schedule 每 6 小时 + 手动触发）
-- 上游有新提交 → main merge 新上游（src/ 0 侵入天然无冲突）→ gen-patch 重生成 → build-fpk → 自动 PR「同步上游到 <sha>」供 review 合并
-- 冲突路径（上游改了 patch 涉及文件）→ 自动开 issue 报告，人工在 patcher 解冲突
-- 上游无新提交 → 静默退出（零成本）
-- **冲突概率实测**：上游 90 天改 49 文件仅撞 2 个 patch 文件（App.tsx/frpcManager.ts）
+- **LTS 冻结**：当前基线 v0.7.5 tag 不可变 → upstream-follow CI 常态静默（保留 hotfix 感知）
+- **上游发新版（如 v0.8.0）**：新开 `adapter/v0.8.0` 分支（从 v0.7.5 分叉）→ diff 命令面/UI 适配点 → 更新能力面 → main src/ 切新基线 → CI 选新组合构建
+- **上游改动 patch 涉及文件** → apply-patches 的 dry-run 预检明确报错 → 在组合工作区人工合并后重新 gen-patch
 
-**手动同步（冲突时兜底）**：
-```
-main:   git fetch upstream && git merge upstream/develop（src/ 快进，无冲突）
-patcher: git rebase --onto main origin/main patcher（冲突在 patcher 人工解决，main 永远干净）
-         → 修改后 push patcher → CI 重新生成 patch
-```
+### 版本矩阵（CI 构建）
 
-- 上游改动 patch 涉及文件 → patch 应用失败 → apply-patches.sh 的 **dry-run 预检**明确报错
-- 上游新增 tauri 命令 / Tauri API 调用 → 需补 `fnos-daemon/src/invoke.rs` 命令 + `fnos-shim/tauri-shim.ts` 降级
+`fnos-build.yml` workflow_dispatch：选 `adapter` 分支 + `patch` 分支 + 架构 → 组合构建。
+- push main / push patch 均触发默认组合（adapter/v0.7.5 + patch）验证构建
+- 构建内强制：0 侵入验证 → verify-adapter（patch requires.api ≤ adapter apiVersion）→ apply-patches → build-fpk
 
 ---
 
@@ -59,7 +72,7 @@ fnos-pack/patches/
 └── fnos-feature-patch.patch   # fnOS 功能：壁纸/日志/通知/音效/replay/守护（11 文件）
 ```
 
-两个 patch 都是**全量**（从干净上游可应用），由 `gen-patch.sh` 从 patcher 分支相对上游 develop 的差异生成，幂等覆盖。
+两个 patch 都是**全量**（从干净上游可应用），由 `gen-patch.sh` 在组合工作区（src = 上游基线 + fnOS 改动）生成，幂等覆盖；产物提交在 patch 分支。
 
 **⚠️ 新增 src/ 改动文件必须登记**：gen-patch.sh 的 `UI_FILES` / `FEATURE_FILES` 数组。漏登记 = patch 未生成 = 修复不进产物（useTunnelProgress 事故教训，gen-patch E6 完整性自检会拦截）。
 
@@ -105,7 +118,7 @@ fnos-api/
 | adapter | **= API 版本号**（声明适配的 API），每上游版本一个 | 上游版本 |
 | patch | 功能版本 | `requires: {api: ">=X"}` 硬依赖 |
 
-**开发流程（patcher 有新需求时）**：
+**开发流程（patch 有新需求时）**：
 1. 先更新 `fnos-api/API.md`（加接口/改契约）→ bump API 版本
 2. adapter 适配新 API（对应上游版本）→ bump adapterVersion = apiVersion
 3. patch 基于新 API 开发 → manifest 声明 `requires: {api: ">=新版本"}`
@@ -123,7 +136,7 @@ fnos-api/
 |------|------|
 | `apply-patches.sh` | 前端 patch 应用到临时副本 → tsc → vite → shim 注入 → `dist-fnos/` |
 | `build-fpk.sh` | daemon musl 静态编译 → 组装 fnpack 项目 → `.fpk`（可 `--bundle` 出更新包） |
-| `gen-patch.sh` | patcher 相对上游 develop 生成两个 patch + E6 完整性自检 |
+| `gen-patch.sh` | 组合工作区相对上游基线生成两个 patch + E6 完整性自检 |
 
 **关键约束**：
 - **daemon 必须 musl 静态编译**（fnOS 基底 Debian 12 glibc 2.36，gnu 动态链接加载即崩）——`cargo build --target x86_64-unknown-linux-musl`
@@ -226,4 +239,4 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 | UI 适配 | ⏳ | 标题栏裁切等 |
 | daemon 中-11 WS seq | ⏳ | 前端 B7 已兜底去重，daemon 侧 seq 方案未做 |
 | 前端 M3 IndexedDB | ⏳ | localStorage 配额溢出防护未做 |
-| 上游 PR | ⏳ 待决策 | 六批修复 PR 回上游 develop（桌面回归门控 __FNOS__ 是硬门槛） |
+| 上游 PR | ⏳ 待决策 | 六批修复 PR 回上游（桌面回归门控 __FNOS__ 是硬门槛） |
