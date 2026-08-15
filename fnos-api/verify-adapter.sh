@@ -93,3 +93,36 @@ if ! diff -q "$TMP_GEN" "$REPO_ROOT/src/fnos-ui-config.ts" >/dev/null; then
     exit 1
 fi
 echo "✅ src/fnos-ui-config.ts 与 manifest 生成版一致"
+
+# 6. patch 依赖校验：每个 patch 的 requires.api 必须 ≤ adapter 的 apiVersion（semver 粗筛）
+PATCH_MANIFEST="$REPO_ROOT/fnos-pack/patches/manifest.json"
+if [ -f "$PATCH_MANIFEST" ]; then
+    echo ""
+    echo "=== patch 依赖校验（requires.api ≤ adapter apiVersion）==="
+    PY_PATCH_MANIFEST="$PATCH_MANIFEST"
+    if command -v cygpath >/dev/null 2>&1; then
+        PY_PATCH_MANIFEST=$(cygpath -w "$PATCH_MANIFEST")
+    fi
+    python - "$PY_MANIFEST" "$PY_PATCH_MANIFEST" <<'PYEOF'
+import json, sys
+
+def ver(v):
+    return tuple(int(x) for x in v.strip().split("."))
+
+adapter = json.load(open(sys.argv[1]))
+api_version = ver(adapter["apiVersion"])
+patches = json.load(open(sys.argv[2]))["patches"]
+
+ok = True
+for p in patches:
+    req = ver(p["requires"]["api"].replace(">=", ""))
+    if req <= api_version:
+        print(f"✅ {p['file']}（featureVersion {p['featureVersion']}，requires.api {p['requires']['api']}）≤ apiVersion {adapter['apiVersion']}")
+    else:
+        print(f"❌ {p['file']} requires.api {p['requires']['api']} 超出 adapter apiVersion {adapter['apiVersion']}（需要先 bump API）", file=sys.stderr)
+        ok = False
+sys.exit(0 if ok else 1)
+PYEOF
+else
+    echo "⚠️ 未找到 $PATCH_MANIFEST，跳过 patch 依赖校验"
+fi

@@ -1,7 +1,7 @@
 # fnOS API 契约（第一版）
 
 > **API 是什么**：fnOS 适配面的**接口契约层**——连接「上游 ChmlFrpLauncher（服务面）」与「fnOS 适配（adapter/patch/daemon）」的稳定接口。
-> **版本化**：API 版本 = 接口演进版本（semver）。adapter 版本号 = 它适配的 API 版本号。
+> **版本化**：API 版本 = 接口演进版本（semver）。adapter 版本号 = **联合版本号**（`{上游基线版本}-{apiVersion}`）。
 > **地位**：API 是唯一权威契约。上游程序通过 adapter 映射到 API；patch 业务逻辑硬依赖 API 版本。
 >
 > 本文档是契约的**人读版**；机器校验用 `fnos-api/manifest.json`。
@@ -150,7 +150,7 @@ src/fnos-ui-config.ts（export const uiConfig = {...} as const）
 ## 九、契约维护规则
 
 1. **API 变更必须 bump 版本**（major=破坏/minor=新增/patch=修复）
-2. **adapter 版本号 = API 版本号**（adapter 声明自己适配的 API 版本）
-3. **patch manifest 声明 `requires: {api: ">=X"}`**——硬依赖，构建时校验
-4. **新需求流程**：更新 API + bump → adapter 适配 → patch 基于新 API 开发 → 校验
+2. **adapter 版本号 = 联合版本号**（`{上游基线版本}-{apiVersion}`）：基线变（如 0.7.5→0.8.0）或 API 变都反映在 adapterVersion
+3. **patch 特性版本号**（`fnos-pack/patches/manifest.json`）：单特性版本，与 API 版本独立演进；只声明 `requires: {api: ">=X"}` 硬依赖，构建期校验
+4. **新需求流程**：更新 API + bump → adapter 适配 → patch 基于新 API 开发（bump featureVersion）→ 校验
 5. **校验**：patch 需要的接口 ⊆ adapter 提供的接口（构建期，semver 粗筛 + 清单精判）

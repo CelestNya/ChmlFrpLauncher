@@ -47,7 +47,7 @@ function App() {
   useAppTheme();
   useAppInitialization();
   useAutoStartTunnels(user);
-  useDeepLink(user);
+  useDeepLink(user, setUser);
   useTunnelNotifications(activeTab);
   const { showCloseConfirmDialog, setShowCloseConfirmDialog } = useWindowEvents();
   const { showTitleBar } = useTitleBar();

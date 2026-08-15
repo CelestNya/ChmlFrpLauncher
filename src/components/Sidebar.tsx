@@ -266,7 +266,8 @@ export function Sidebar({
       const session = await createDeviceAuthorization();
       setAuthSession(session);
       await openVerificationPage(session);
-      void pollToken(session.device_code, 3);
+      const intervalSeconds = Math.max(Number(session.interval || 5), 1);
+      void pollToken(session.device_code, intervalSeconds);
     } catch (err) {
       stopPolling();
       setAuthSession(null);

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "description": "fnOS patch 版本声明。featureVersion = patch 特性版本（功能演进，与 API 版本独立）；requires.api = 对 fnOS API 的硬依赖（构建期校验：requires.api ≤ adapter.apiVersion）。",
+  "patches": [
+    {
+      "file": "fnos-ui-patch.patch",
+      "featureVersion": "1.0.0",
+      "features": "UI 裁剪配置化（uiConfig 驱动条件渲染）：TitleBar/杀软弹窗/开机自启/托盘/文件夹导入",
+      "requires": { "api": ">=1.0.0" }
+    },
+    {
+      "file": "fnos-feature-patch.patch",
+      "featureVersion": "1.0.0",
+      "features": "fnOS 功能：守护默认开启、WS 重连 replay 去重/静默、日志清空联动、壁纸砍轮播、音效网关前缀",
+      "requires": { "api": ">=1.0.0" }
+    }
+  ]
+}

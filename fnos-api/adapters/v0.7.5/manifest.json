@@ -1,6 +1,6 @@
 {
   "adapterName": "chmlfrp-fnos-adapter",
-  "adapterVersion": "1.0.0",
+  "adapterVersion": "0.7.5-1.0.0",
   "apiVersion": "1.0.0",
   "upstream": {
     "repo": "TechCat-Team/ChmlFrpLauncher",
@@ -74,11 +74,12 @@
   },
 
   "versioning": {
-    "rule": "adapterVersion == apiVersion（adapter 声明自己适配的 API 版本）",
+    "rule": "adapterVersion = {上游基线版本}-{apiVersion} 联合版本号（adapter 声明自己基于哪个上游版本、适配哪个 API 版本）",
     "bump": {
-      "major": "API 接口破坏性变更时",
-      "minor": "API 新增接口时",
-      "patch": "本 adapter 修复（不影响 API 契约）"
+      "baseline": "上游基线版本（随适配对象变，如 0.7.5 → 0.8.0）",
+      "api.major": "API 接口破坏性变更时",
+      "api.minor": "API 新增接口时",
+      "api.patch": "本 adapter 修复（不影响 API 契约）"
     }
   }
 }

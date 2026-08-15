@@ -113,7 +113,6 @@ const DEVICE_CODE_DEFAULT_SCOPE = "profile email offline_access chmlfrp_api";
 
 // 简单的请求去重（针对短时间内重复发起相同请求的场景）
 const pendingRequests = new Map<string, Promise<unknown>>();
-const tokenRefreshPromises = new Map<string, Promise<AuthenticatedUser>>();
 
 function normalizeHeaders(h?: HeadersInit): Record<string, string> {
   if (!h) return {};
@@ -235,48 +234,13 @@ async function refreshAccessToken(refreshToken: string): Promise<DeviceTokenResp
   );
 }
 
-interface AuthenticatedUser {
+async function ensureAuthenticatedUser(
+  explicitToken?: string,
+): Promise<{
   storedUser: StoredUser | null;
   accessToken?: string;
   legacyToken?: string;
-}
-
-async function refreshAuthenticatedUser(
-  storedUser: StoredUser,
-): Promise<AuthenticatedUser> {
-  const refreshToken = storedUser.refreshToken!;
-  const refreshed = await refreshAccessToken(refreshToken);
-  if (!refreshed.access_token) {
-    if (getStoredUser()?.refreshToken === refreshToken) {
-      clearStoredUser();
-    }
-    throw new Error(
-      getOAuthErrorMessage(refreshed, "登录信息已过期，请重新登录"),
-    );
-  }
-
-  const updatedUser: StoredUser = {
-    ...storedUser,
-    accessToken: refreshed.access_token,
-    refreshToken: refreshed.refresh_token || storedUser.refreshToken,
-    accessTokenExpiresAt: refreshed.expires_in
-      ? Date.now() + refreshed.expires_in * 1000
-      : storedUser.accessTokenExpiresAt,
-    tokenType: refreshed.token_type || storedUser.tokenType || "Bearer",
-  };
-  if (getStoredUser()?.refreshToken === refreshToken) {
-    saveStoredUser(updatedUser);
-  }
-  return {
-    storedUser: updatedUser,
-    accessToken: updatedUser.accessToken,
-    legacyToken: getLegacyApiToken(updatedUser),
-  };
-}
-
-async function ensureAuthenticatedUser(
-  explicitToken?: string,
-): Promise<AuthenticatedUser> {
+}> {
   if (explicitToken?.trim()) {
     return {
       storedUser: getStoredUser(),
@@ -292,15 +256,28 @@ async function ensureAuthenticatedUser(
   const currentAccessToken = getCurrentAccessToken(storedUser);
   if (currentAccessToken) {
     if (storedUser.refreshToken && isAccessTokenExpiring(storedUser)) {
-      const refreshToken = storedUser.refreshToken;
-      let refreshPromise = tokenRefreshPromises.get(refreshToken);
-      if (!refreshPromise) {
-        refreshPromise = refreshAuthenticatedUser(storedUser).finally(() => {
-          tokenRefreshPromises.delete(refreshToken);
-        });
-        tokenRefreshPromises.set(refreshToken, refreshPromise);
+      const refreshed = await refreshAccessToken(storedUser.refreshToken);
+      if (!refreshed.access_token) {
+        clearStoredUser();
+        throw new Error(
+          getOAuthErrorMessage(refreshed, "登录信息已过期，请重新登录"),
+        );
       }
-      return refreshPromise;
+      const updatedUser: StoredUser = {
+        ...storedUser,
+        accessToken: refreshed.access_token,
+        refreshToken: refreshed.refresh_token || storedUser.refreshToken,
+        accessTokenExpiresAt: refreshed.expires_in
+          ? Date.now() + refreshed.expires_in * 1000
+          : storedUser.accessTokenExpiresAt,
+        tokenType: refreshed.token_type || storedUser.tokenType || "Bearer",
+      };
+      saveStoredUser(updatedUser);
+      return {
+        storedUser: updatedUser,
+        accessToken: updatedUser.accessToken,
+        legacyToken: getLegacyApiToken(updatedUser),
+      };
     }
 
     return {
@@ -322,41 +299,22 @@ async function ensureAuthenticatedUser(
   throw new Error("登录信息已过期，请重新登录");
 }
 
-async function rawHttpRequest(
-  url: string,
-  options?: RequestInit,
-): Promise<RawHttpResponse> {
-  if (typeof window !== "undefined" && "__TAURI__" in window) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<RawHttpResponse>("http_request_raw", {
-      options: {
-        url,
-        method: (options?.method ?? "GET").toUpperCase(),
-        headers: normalizeHeaders(options?.headers),
-        body: options?.body ? String(options.body) : undefined,
-        bypass_proxy: getBypassProxy(),
-      },
-    });
-  }
-
-  const response = await fetch(url, options);
-  return {
-    status: response.status,
-    body: await response.text(),
-  };
-}
-
 async function oauthRequest(options: {
   path: string;
   body: URLSearchParams;
 }): Promise<RawHttpResponse> {
-  return rawHttpRequest(getOAuthUrl(options.path), {
+  const response = await fetch(getOAuthUrl(options.path), {
     method: "POST",
     headers: getOAuthHeaders(),
     body: options.body.toString(),
     cache: "no-store",
     credentials: "omit",
   });
+
+  return {
+    status: response.status,
+    body: await response.text(),
+  };
 }
 
 function parseOAuthJson<T>(response: RawHttpResponse, fallback: string): T {
@@ -397,12 +355,50 @@ async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     try {
       const url = getRequestUrl(endpoint);
 
-      const response = await rawHttpRequest(url, options);
-      const data = JSON.parse(response.body) as ApiResponse<T>;
-      if (data?.code === 200) {
-        return data.data as T;
+      const bypassProxy = getBypassProxy();
+
+      // 在 Tauri 环境中，如果启用绕过代理，使用 Tauri 命令
+      if (
+        typeof window !== "undefined" &&
+        "__TAURI__" in window &&
+        bypassProxy
+      ) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const method = (options?.method ?? "GET").toUpperCase();
+        const headers: Record<string, string> = {};
+
+        if (headersObj) {
+          Object.entries(headersObj).forEach(([k, v]) => {
+            headers[k] = v;
+          });
+        }
+
+        const body = options?.body ? String(options.body) : undefined;
+
+        const responseText = await invoke<string>("http_request", {
+          options: {
+            url,
+            method,
+            headers: Object.keys(headers).length > 0 ? headers : undefined,
+            body,
+            bypass_proxy: true,
+          },
+        });
+
+        const data = JSON.parse(responseText) as ApiResponse<T>;
+        if (data?.code === 200) {
+          return data.data as T;
+        }
+        throw new Error(data?.msg || "请求失败");
+      } else {
+        // 使用普通的 fetch
+        const res = await fetch(url, options);
+        const data = (await res.json()) as ApiResponse<T>;
+        if (data?.code === 200) {
+          return data.data as T;
+        }
+        throw new Error(data?.msg || "请求失败");
       }
-      throw new Error(data?.msg || `HTTP ${response.status}: 请求失败`);
     } finally {
       pendingRequests.delete(key);
     }
@@ -620,16 +616,52 @@ export async function offlineTunnel(
     authorization,
   };
 
-  const response = await rawHttpRequest(getRequestUrl(endpoint), {
-    method: "POST",
-    headers: headersObj,
-    body: formData.toString(),
-  });
-  const data = JSON.parse(response.body) as OfflineTunnelResponse;
-  if (data?.code === 200 && data?.state === "success") {
-    return;
+  const bypassProxy = getBypassProxy();
+
+  // 在 Tauri 环境中，如果启用绕过代理，使用 Tauri 命令
+  if (typeof window !== "undefined" && "__TAURI__" in window && bypassProxy) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const url = endpoint.startsWith("/")
+      ? `${API_BASE_URL}${endpoint}`
+      : `${API_BASE_URL}/${endpoint}`;
+
+    const responseText = await invoke<string>("http_request", {
+      options: {
+        url,
+        method: "POST",
+        headers: headersObj,
+        body: formData.toString(),
+        bypass_proxy: true,
+      },
+    });
+
+    const data = JSON.parse(responseText) as OfflineTunnelResponse;
+    if (data?.code === 200 && data?.state === "success") {
+      return;
+    }
+    throw new Error(data?.msg || "下线隧道失败");
+  } else {
+    // 使用普通的 fetch
+    const url = endpoint.startsWith("/")
+      ? `${API_BASE_URL}${endpoint}`
+      : `${API_BASE_URL}/${endpoint}`;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: headersObj,
+      body: formData.toString(),
+    });
+
+    if (!res.ok) {
+      throw new Error(`HTTP错误: ${res.status}`);
+    }
+
+    const data = (await res.json()) as OfflineTunnelResponse;
+    if (data?.code === 200 && data?.state === "success") {
+      return;
+    }
+    throw new Error(data?.msg || "下线隧道失败");
   }
-  throw new Error(data?.msg || `HTTP ${response.status}: 下线隧道失败`);
 }
 
 export async function deleteTunnel(
