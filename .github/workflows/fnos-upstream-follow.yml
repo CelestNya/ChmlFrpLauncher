@@ -15,6 +15,10 @@ name: fnOS Upstream Follow
 # 冲突路径（上游改了 patch 涉及文件）：
 #   gen-patch 自检失败 → 不硬解，自动开 issue 报告冲突文件，人工处理
 #
+# 分支矩阵拓扑（2026-08-15）：本 workflow 只保留「hotfix 感知」职责——v0.7.5 tag 不可变，
+# 常态静默退出。若上游 force 更新 v0.7.5：人工在组合工作区（main + adapter/v0.7.5 + patch）
+# 重新 gen-patch 并提交 patch 分支，然后手动 dispatch fnos-build 验证。
+# patch 重生成不再是本 workflow 的职责（patch 分支直接持有产物）。
 # 为什么 main merge 上游天然无冲突：
 #   main 的 src/ == 上游 v0.7.5（0 侵入不变式），merge 新上游 = src/ 快进；
 #   fork 附加文件（fnos-daemon/ fnos-shim/ fnos-pack/ docs/）与上游无交集。
