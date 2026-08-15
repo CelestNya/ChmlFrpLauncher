@@ -1,5 +1,0 @@
-#!/bin/bash
-
-### uninstall_callback: fnOS 生命周期钩子（无额外操作）
-
-exit 0
