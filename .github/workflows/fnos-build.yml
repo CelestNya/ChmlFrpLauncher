@@ -1,15 +1,42 @@
 name: fnOS Build
 
-# 构建 ChmlFrp fnOS 版 .fpk（双架构）。
-# 触发：打 tag v* 时与桌面版并行；也可手动触发。
-# 流程：patch → 前端构建 → 注入 shim → daemon 编译（x86_64 原生 + aarch64 交叉）→ 组装 .fpk
+# 构建 ChmlFrp fnOS 版 .fpk（分支矩阵拓扑，2026-08-15）。
+# 组合模型：main（src 0 侵入）+ adapter/<ver> 分支（fnos-api 契约）+ patch 分支（业务实现）。
+# src 基线由 adapter manifest 声明的 upstream.ref 确定（「src 根据 adapter 版本确定」）。
+#
+# 触发：
+#   - workflow_dispatch：选 adapter 分支 + patch 分支 + 架构（版本矩阵构建）
+#   - push main：默认组合（adapter/v0.7.5 + patch）回归构建
+#   - push patch 分支：patch 业务变更 → 组合验证构建（patch 依赖校验 CI 化）
+#
+# 流程：组合 checkout → 0 侵入验证（src == adapter 声明的上游 ref）→ patch 依赖校验
+#      （requires.api ≤ adapter apiVersion）→ apply-patches → build-fpk
 # 桌面版 workflow（release.yml）不动。
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main, patch]
   workflow_dispatch:
+    inputs:
+      adapter:
+        description: adapter 分支（决定 src 基线 + API 契约版本）
+        type: choice
+        options:
+          - adapter/v0.7.5
+        default: adapter/v0.7.5
+      patch:
+        description: patch 分支（fnOS 业务实现）
+        type: choice
+        options:
+          - patch
+        default: patch
+      arch:
+        description: 目标架构
+        type: choice
+        options:
+          - x86_64
+          - aarch64
+        default: x86_64
 
 # D4：最小权限——构建只需读仓库；attach-bundles 单独声明 write（上传 release asset）
 permissions:
@@ -30,21 +57,48 @@ jobs:
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: "aarch64-linux-musl-gcc"
 
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 组合：从 adapter/patch 分支拉对应目录进工作区（分支矩阵核心）
+      - name: Compose adapter + patch branches
+        run: |
+          set -euo pipefail
+          ADAPTER="${{ github.event.inputs.adapter || 'adapter/v0.7.5' }}"
+          PATCH="${{ github.event.inputs.patch || 'patch' }}"
+          echo "组合: adapter=$ADAPTER + patch=$PATCH"
+          git fetch origin "$ADAPTER" "$PATCH"
+          git checkout "$ADAPTER" -- fnos-api/
+          git checkout "$PATCH" -- fnos-pack/ fnos-daemon/ fnos-shim/
+
+          # src 基线由 adapter 声明的 upstream.ref 确定
+          SRC_REF=$(python3 -c "import json; print(json.load(open('fnos-api/adapters/v0.7.5/manifest.json'))['upstream']['ref'])")
+          echo "adapter 声明 src 基线: $SRC_REF"
+          git remote add upstream https://github.com/TechCat-Team/ChmlFrpLauncher.git 2>/dev/null || true
+          git fetch upstream "refs/tags/$SRC_REF:refs/remotes/upstream/$SRC_REF"
+
+          # 0 侵入不变式：main 的 src/ 必须与 adapter 声明的上游 ref 一致
+          if ! git diff --quiet "upstream/$SRC_REF" -- src/; then
+            echo "❌ main 的 src/ 与 adapter 声明的上游 $SRC_REF 不一致（0 侵入被破坏）" >&2
+            exit 1
+          fi
+          echo "✅ 0 侵入验证通过（src == upstream/$SRC_REF）"
+
+      # patch 依赖校验 CI 化：requires.api ≤ adapter apiVersion + 命令面/uiConfig 覆盖
+      - name: Verify adapter coverage & patch deps
+        run: |
+          bash fnos-api/verify-adapter.sh
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          # pnpm 11：上游 develop 的 pnpm-workspace.yaml 仅含 allowBuilds（无 packages 字段），
-          # pnpm 9 会报「packages field missing or empty」（首次切基线后 CI 实测）；
-          # 本地 pnpm 11.8.0 与 lockfile 已验证兼容
           version: 11
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          # Node 22+：pnpm 11 要求 Node ≥ 22.13（22 是 LTS，本地验证过 Node 24 / pnpm 11.8）
           node-version: 22
           cache: pnpm
 
@@ -88,9 +142,6 @@ jobs:
       - name: Setup aarch64 musl toolchain
         if: matrix.arch == 'aarch64'
         run: |
-          # aarch64-linux-musl-cross 交叉工具链（musl.cc GitHub 镜像：runner 可访问；
-          # musl.cc 官网在 runner 上 443 超时）。D6：锁定 release tag 而非 latest，
-          # 镜像更新/改资产不会悄悄改变工具链
           if [ ! -x /tmp/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc ]; then
             curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 15 -o /tmp/aarch64-musl.tgz \
               https://github.com/musl-cc/musl.cc/releases/download/v0.0.1/aarch64-linux-musl-cross.tgz
