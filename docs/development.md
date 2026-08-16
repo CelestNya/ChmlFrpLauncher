@@ -42,13 +42,23 @@ git checkout patch -- fnos-pack/ fnos-daemon/ fnos-shim/
 bash fnos-api/verify-adapter.sh   # 命令面 + uiConfig 键 + patch 依赖校验
 ```
 
-### 日常开发流程（改 fnOS 功能 → patch 分支）
+### 日常开发流程（2026-08-16 起：裁剪归 adapter、功能归 patch）
 
-1. 组合工作区下改前端（src/ 应用态）或 daemon/shim
-2. 重新生成 patch（patch 分支不含 src，diff 基线 = adapter 声明的上游 ref）：
-   `BASE=v0.7.5 bash fnos-pack/gen-patch.sh`（工作区 src = 上游 + 改动）
-3. 只提交 patch 分支的产物（fnos-pack/patches/ + daemon + shim），**不提交 src/**
+**改 fnOS 功能 → patch 分支**：
+
+1. 组合工作区下改功能代码（src/ 应用态）或 daemon/shim
+2. 重新生成 feature patch：`BASE=v0.7.5 bash fnos-pack/gen-patch.sh`（清单从 adapter manifest 的 uiFiles.featureBranch 读，diff 基线 = adapter 声明的上游 ref）
+3. 提交 patch 分支的产物（fnos-pack/patches/fnos-feature-patch.patch + daemon + shim），**不提交 src/**
 4. `git push origin patch` → fnos-build CI 组合验证（patch 依赖校验强制）
+
+**改 UI 裁剪 → adapter 分支**：
+
+1. 组合工作区下改 UI 代码（条件渲染，src/ 应用态）
+2. `BASE=v0.7.5 bash fnos-pack/gen-patch.sh` 重新生成 crop patch（清单从 uiFiles.uiCrop 读，输出到 `fnos-api/adapters/v0.7.5/ui-crop.patch`）
+3. 提交 adapter 分支（ui-crop.patch；如需新增裁剪项则同步改 manifest 的 uiConfig.values）
+4. `git push origin adapter/v0.7.5` → 验证构建（组合态 verify 扫描面含 crop）
+
+**原则**：patch 分支零裁剪代码（不 import uiConfig、不写条件渲染）；UI 裁剪由 adapter 配置化（manifest uiConfig.values + uiCropPatch）在构建期应用；上游 UI 改动冲突由 adapter 的 ui-crop.patch 消化，patch 只关心功能逻辑。
 
 ### 上游同步（主仓更新时）
 
@@ -74,14 +84,19 @@ bash fnos-api/verify-adapter.sh   # 命令面 + uiConfig 键 + patch 依赖校�
 ## 二、Patch 机制
 
 ```
+# patch 分支（功能）
 fnos-pack/patches/
-├── fnos-ui-patch.patch        # UI 裁剪：删 TitleBar/杀软弹窗/自启/托盘（4 文件）
-└── fnos-feature-patch.patch   # fnOS 功能：壁纸/日志/通知/音效/replay/守护（11 文件）
+└── fnos-feature-patch.patch   # fnOS 功能：壁纸/日志/通知/音效/replay/守护/掉登录（10 文件）
+
+# adapter 分支（UI 裁剪，2026-08-16 起归 adapter）
+fnos-api/adapters/v0.7.5/
+├── ui-crop.patch              # UI 裁剪：TitleBar/杀软弹窗/自启/托盘/文件夹导入/幻灯片间隔（3 文件）
+└── manifest.json              # uiConfig.values（裁剪开关）+ uiFiles（文件清单）+ uiCropPatch（路径）
 ```
 
-两个 patch 都是**全量**（从干净上游可应用），由 `gen-patch.sh` 在组合工作区（src = 上游基线 + fnOS 改动）生成，幂等覆盖；产物提交在 patch 分支。
+两个 patch 都是**全量**（从干净上游可应用），由 `gen-patch.sh` 在组合工作区（src = 上游基线 + fnOS 改动）生成，幂等覆盖；crop 提交 adapter 分支、feature 提交 patch 分支。构建期 apply-patches 按 feature → crop 顺序应用。
 
-**⚠️ 新增 src/ 改动文件必须登记**：gen-patch.sh 的 `UI_FILES` / `FEATURE_FILES` 数组。漏登记 = patch 未生成 = 修复不进产物（useTunnelProgress 事故教训，gen-patch E6 完整性自检会拦截）。
+**⚠️ 新增 src/ 改动文件必须登记**：adapter manifest 的 `uiFiles.uiCrop` / `uiFiles.featureBranch` 数组（gen-patch 从 manifest 读清单，E6 完整性自检会拦截漏登记——useTunnelProgress 事故教训）。
 
 ### 前后端分离重构（2026-08-13，ADR-0001~0004）
 
