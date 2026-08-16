@@ -39,6 +39,7 @@ FEATURE_FILES=(
   src/components/pages/Logs.tsx
   src/components/App/hooks/useAppInitialization.ts
   src/components/pages/Settings/hooks/useProcessGuard.ts
+  src/services/api.ts  # 掉登录修复移植（e051411 token 刷新竞态，2026-08-15）
 )
 
 echo "[gen-patch] 基线: $BASE"
