@@ -7,13 +7,29 @@
       "file": "fnos-ui-patch.patch",
       "featureVersion": "1.0.1",
       "features": "UI 裁剪配置化（uiConfig 驱动条件渲染）：TitleBar/杀软弹窗/开机自启/托盘/文件夹导入；iframe 内容 padding（修复）",
-      "requires": { "api": ">=1.0.0" }
+      "requires": {
+        "api": ">=1.0.0"
+      }
     },
     {
       "file": "fnos-feature-patch.patch",
       "featureVersion": "1.5.1",
       "features": "功能 5 代：守护默认开启/WS 重连 replay 去重/日志清空联动/壁纸砍轮播/音效网关前缀；修复：掉登录（token 并发刷新）",
-      "requires": { "api": ">=1.0.0" }
+      "requires": {
+        "api": ">=1.0.0"
+      }
+    }
+  ],
+  "versionHistory": [
+    {
+      "version": "1.0.0",
+      "date": "2026-08-15",
+      "note": "临时标号（未定语义，所有 patch 统一 1.0.0）"
+    },
+    {
+      "version": "1.5.2",
+      "date": "2026-08-16",
+      "note": "语义定版：架构.功能.修复（架构 1：uiConfig 配置化；功能 5 代：守护/replay/日志清空/壁纸/音效；修复 2：掉登录/padding）。E4 联合号 0.7.5-1.5.2"
     }
   ]
 }
