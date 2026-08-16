@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # fnos-pack/apply-patches.sh
-# fnOS 构建链：在临时副本上应用 fnos-ui-patch.patch（源码级），随后构建前端并注入 shim。
+# fnOS 构建链：在临时副本上应用 feature patch（patch 分支）+ crop patch（adapter 分支），
+# 随后构建前端并注入 shim。UI 裁剪归 adapter（2026-08-16 决策）：crop 路径从
+# adapter manifest 的 uiCropPatch 字段读，构建期应用，patch 分支零裁剪代码。
 # 源码副本不落盘到仓库（形态 C：工作树 src/ 零改动）。
 #
 # 用法（仓库根目录执行）:
@@ -15,8 +17,20 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # 纯函数库（E1 目录校验等，可独立单测：bash fnos-pack/tests/lib.test.sh）
 source "$REPO_ROOT/fnos-pack/lib.sh"
-PATCH_FILE="$REPO_ROOT/fnos-pack/patches/fnos-ui-patch.patch"
+# 功能 patch（patch 分支持有）
 FEATURE_PATCH_FILE="$REPO_ROOT/fnos-pack/patches/fnos-feature-patch.patch"
+# UI 裁剪 patch（adapter 分支持有；路径从 manifest 读，node 认 Git Bash 的 /d/ 路径）
+ADAPTER_MANIFEST="$REPO_ROOT/fnos-api/adapters/v0.7.5/manifest.json"
+if [ ! -f "$ADAPTER_MANIFEST" ]; then
+    echo "[fnos-pack] ❌ 缺少 adapter manifest（组合态缺失：请先 checkout adapter 分支的 fnos-api/）" >&2
+    exit 1
+fi
+CROP_PATCH=$(node -e "console.log(require('$ADAPTER_MANIFEST').uiCropPatch || '')")
+if [ -z "$CROP_PATCH" ]; then
+    echo "[fnos-pack] ❌ adapter manifest 未声明 uiCropPatch" >&2
+    exit 1
+fi
+PATCH_FILE="$REPO_ROOT/fnos-api/$CROP_PATCH"
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/dist-fnos}"
 # E1：输出目录边界校验（本脚本会 rm -rf 该目录，防误删仓库）
 validate_output_dir "$OUTPUT_DIR" "$REPO_ROOT" || exit 1
@@ -44,19 +58,19 @@ cp -r "$REPO_ROOT/public" "$TMP_WORK/public"
 # patch 可能涉及的文件（其余依赖源码文件保持原样）
 
 echo "[fnos-pack] 预检 patch（--dry-run）…"
-if ! patch -p1 --dry-run -d "$TMP_WORK" < "$PATCH_FILE"; then
-  echo "[fnos-pack] ❌ UI patch 预检失败：请更新 fnos-pack/patches/fnos-ui-patch.patch 以匹配当前 src/" >&2
-  exit 1
-fi
 if ! patch -p1 --dry-run -d "$TMP_WORK" < "$FEATURE_PATCH_FILE"; then
   echo "[fnos-pack] ❌ feature patch 预检失败：请更新 fnos-pack/patches/fnos-feature-patch.patch 以匹配当前 src/" >&2
   exit 1
 fi
+if ! patch -p1 --dry-run -d "$TMP_WORK" < "$PATCH_FILE"; then
+  echo "[fnos-pack] ❌ crop patch 预检失败：请更新 adapter 分支的 $CROP_PATCH 以匹配当前 src/" >&2
+  exit 1
+fi
 
 echo "[fnos-pack] 应用 patch…"
-patch -p1 -d "$TMP_WORK" < "$PATCH_FILE"
 patch -p1 -d "$TMP_WORK" < "$FEATURE_PATCH_FILE"
-echo "[fnos-pack] ✅ patch 应用成功（ui + feature）"
+patch -p1 -d "$TMP_WORK" < "$PATCH_FILE"
+echo "[fnos-pack] ✅ patch 应用成功（feature + crop）"
 
 # 生成 fnOS UI 配置（adapter manifest 唯一权威；覆盖 patcher 手写版，保证构建产物与契约一致）
 echo "[fnos-pack] 生成 fnOS UI 配置（adapter manifest）…"
