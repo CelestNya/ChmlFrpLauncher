@@ -233,6 +233,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # gh 需要 git 仓库识别 repo（2026-08-17 修复：无 checkout 时 gh release 命令
+      #  报 "not a git repository"，release 创建和 attach 全部静默失败）
+      - uses: actions/checkout@v4
+
       - name: Download all fnOS bundles
         uses: actions/download-artifact@v4
         with:
