@@ -1,18 +1,16 @@
 name: Tauri Build & Release
 
+# fork 改动（2026-08-16 用户决策）：fork 不构建桌面版——桌面用户直接走
+# 上游 release，fork 的发布面只有 fnOS（fnos-build.yml）。push 触发关闭，
+# 仅保留手动 dispatch 兜底；误 push 上游 v* tag 也不会触发桌面构建，
+# 不会生成抢占 releases/latest 的桌面 release。
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
 
 jobs:
   release:
     name: Tauri Build (${{ matrix.platform }})
     runs-on: ${{ matrix.platform }}
-    # fork 唯一改动（2026-08-16）：fnOS 发版 tag（fnos-*）不触发桌面构建。
-    # v* tags 语义归桌面版（上游原版）；同步上游时若把上游 v* tag push 上来，
-    # 本 workflow 照常跑桌面构建（与上游语义一致），不冲突。
-    if: ${{ !startsWith(github.ref, 'refs/tags/fnos-') }}
 
     strategy:
       fail-fast: false

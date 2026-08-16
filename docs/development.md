@@ -214,7 +214,7 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 
 | 层 | 命令 | 数量 |
 |----|------|------|
-| daemon (Rust) | `cd fnos-daemon && cargo test` | 71（含 settings/background/capabilities/update 拦截新测试） |
+| daemon (Rust) | `cd fnos-daemon && cargo test` | 66（含 settings/background/capabilities 新测试 + 联合版本号断言） |
 | 前端 (vitest) | `pnpm exec vitest run` | 45（shim 27 + src 18） |
 | 构建链 (bash) | `bash fnos-pack/tests/lib.test.sh` | 9 断言 |
 | 类型/风格 | `pnpm exec tsc --noEmit` / `pnpm exec eslint` | — |
@@ -227,24 +227,20 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 
 **版本号**：E4 联合号 `app-patchSetVersion`（如 `0.7.5-1.5.2`），语义见 §一「版本号规范」。
 
-**tag 命名空间隔离**（fork 带 15 个上游 `v*` tags 的应对）：
+**单线版本策略**（用户定论）：任何时候只有一条活跃线——0.8.0 release 前维护 `0.7.5+patch`；0.8.0 release 后停止 0.7.5 线维护，最快速度出 0.8.0 patch。检测更新永远面对一条线，联合号不会造成新旧混乱（daemon `version_compare` 分段比较已验证：同线 patch 升级与跨线切换均正确）。
 
-- 发版 tag 统一 **`fnos-<联合号>`**（如 `fnos-0.7.5-1.5.2`）——`v*` 归上游语义（桌面原版，release.yml），`fnos-*` 归 fnOS 版（fnos-build.yml）
-- 上游 tags 不删不动：无 release 的 tag 不出现在 Releases 页，删了反而破坏上游对照
-- 同步上游**只 fetch 不 push --tags**（约定）；即使误 push 上游 tag，也只有桌面 release.yml 会跑（上游语义无害），fnOS 构建和更新通道不受影响
-- release.yml（上游文件）唯一改动：job 排除 `refs/tags/fnos-`，fnOS 发版不触发桌面构建
+**发布面**（fork 自治，用户定论）：
 
-**更新通道拦截**（daemon `fetch_latest`，2026-08-16）：
-
-- 端点：`releases/latest` → `releases?per_page=100` 列表——latest 是 fork 内所有正式 release 共用指针，桌面 release 或误触发生成的 release 会抢占它导致更新通道静默失效
-- 只认 `fnos-` 前缀 tag 的 release，其余跳过继续找下一个；找不到返回「无更新」不报错
-- 前端「检测更新」（shim 转发 `/api/update/check`）与 daemon 自更新共用 `fetch_latest`，一处拦截覆盖两个入口
+- fork **不构建桌面版**（release.yml push 触发已关闭，仅保留手动兜底）——桌面用户走上游 release；fork 的 latest 只有 fnOS release，不会被抢占
+- daemon 更新检查直接扫 **fork `releases/latest`**（`CelestNya/ChmlFrpLauncher`），asset 精确匹配 `chmlfrp-fnos-{version}-{platform}.tar.gz`；前端「检测更新」（shim 转发 `/api/update/check`）与 daemon 自更新共用 `fetch_latest`，同一个源
+- 发版 tag：**`v<联合号>`**（如 `v0.7.5-1.5.2`），与上游 v* 风格一致；CI 触发 `v*-*` 按「带连字符」隔离——上游 v* tags（v0.7.5）无连字符，进不来
+- 上游 15 个 tags 不删不动：无 release 的 tag 不出现在 Releases 页，删了反而破坏上游对照；同步上游**只 fetch 不 push --tags**
 
 **发版 checklist**：
 
-1. 实测稳定确认 → 在 main 打 tag：`git tag fnos-<联合号> && git push origin fnos-<联合号>`
-2. CI（fnos-build.yml `fnos-*` 触发）：双架构构建 → fpk 完整性验证 → attach-bundles 建 release + 附加 bundle
-3. 验证 release：Releases 页确认 bundle asset（x86/arm）齐全、tag 名带 `fnos-` 前缀
+1. 实测稳定确认 → 在 main 打 tag：`git tag v<联合号> && git push origin v<联合号>`
+2. CI（fnos-build.yml `v*-*` 触发）：双架构构建 → fpk 完整性验证 → attach-bundles 建 release + 附加 bundle
+3. 验证 release：Releases 页确认 bundle asset（x86/arm）齐全、tag 名为 `v<联合号>`
 4. NAS 实测自更新：守护调 `/api/update/check` 应返回新版本 → 下载 → 应用
 
 **已发布组合**：NAS 上运行 0.7.5 fpk（含 padding + 掉登录修复；联合号定版前构建，功能一致）。
@@ -255,7 +251,7 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 
 | 项 | 状态 | 说明 |
 |----|------|------|
-| 自更新通道 | ⏳ 等首次发版 | 拦截已落地（只认 fnos-* release），随 fnos-0.7.5-1.5.2 发版启用 |
+| 自更新通道 | ⏳ 等首次发版 | 扫 fork latest（fork 无桌面版不会被抢占），随 v0.7.5-1.5.2 发版启用 |
 | daemon 自保 | ⏳ | 应用中心层面，daemon 崩溃无自拉起 |
 | OAuth CORS | ⏳ | iframe 下可能失败（本次实测正常） |
 | UI 适配 | ⏳ | 标题栏裁切等 |
