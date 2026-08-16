@@ -214,7 +214,7 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 
 | 层 | 命令 | 数量 |
 |----|------|------|
-| daemon (Rust) | `cd fnos-daemon && cargo test` | 66（含 settings/background/capabilities 新测试） |
+| daemon (Rust) | `cd fnos-daemon && cargo test` | 71（含 settings/background/capabilities/update 拦截新测试） |
 | 前端 (vitest) | `pnpm exec vitest run` | 45（shim 27 + src 18） |
 | 构建链 (bash) | `bash fnos-pack/tests/lib.test.sh` | 9 断言 |
 | 类型/风格 | `pnpm exec tsc --noEmit` / `pnpm exec eslint` | — |
@@ -223,16 +223,31 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 
 ---
 
-## 六、发版策略
+## 六、发版策略（2026-08-16 定版）
 
-**当前（2026-08-13 用户决策）**：上游未发 0.8.0 release（Latest = v0.7.5），dev 代码刚动（8-12 升级依赖），**跟随上游节奏暂不发 release**。
+**版本号**：E4 联合号 `app-patchSetVersion`（如 `0.7.5-1.5.2`），语义见 §一「版本号规范」。
 
-- **版本号永远与上游同步，不 bump**（用户定论）：fnOS 改动不升版本号，升级走 uninstall→install（§四）；E4 版本一致性保证 manifest/Cargo.toml/package.json 三处一致
-- NAS 上的 0.8.0 仅内部测试版，走 uninstall→install-fpk --volume 1 手动升级
-- 自更新通道（依赖 GitHub Release asset）等上游发版后再启用
-- 上游发版后：跟随 tag 同步基线 → 发我们的 v0.8.0 + attach fnOS bundle
+**tag 命名空间隔离**（fork 带 15 个上游 `v*` tags 的应对）：
 
-**发版动作（未来）**：打 tag v* → fnos-build CI（双架构 .fpk + --bundle）→ attach bundles → 前端"检测更新"可用内部自更新。
+- 发版 tag 统一 **`fnos-<联合号>`**（如 `fnos-0.7.5-1.5.2`）——`v*` 归上游语义（桌面原版，release.yml），`fnos-*` 归 fnOS 版（fnos-build.yml）
+- 上游 tags 不删不动：无 release 的 tag 不出现在 Releases 页，删了反而破坏上游对照
+- 同步上游**只 fetch 不 push --tags**（约定）；即使误 push 上游 tag，也只有桌面 release.yml 会跑（上游语义无害），fnOS 构建和更新通道不受影响
+- release.yml（上游文件）唯一改动：job 排除 `refs/tags/fnos-`，fnOS 发版不触发桌面构建
+
+**更新通道拦截**（daemon `fetch_latest`，2026-08-16）：
+
+- 端点：`releases/latest` → `releases?per_page=100` 列表——latest 是 fork 内所有正式 release 共用指针，桌面 release 或误触发生成的 release 会抢占它导致更新通道静默失效
+- 只认 `fnos-` 前缀 tag 的 release，其余跳过继续找下一个；找不到返回「无更新」不报错
+- 前端「检测更新」（shim 转发 `/api/update/check`）与 daemon 自更新共用 `fetch_latest`，一处拦截覆盖两个入口
+
+**发版 checklist**：
+
+1. 实测稳定确认 → 在 main 打 tag：`git tag fnos-<联合号> && git push origin fnos-<联合号>`
+2. CI（fnos-build.yml `fnos-*` 触发）：双架构构建 → fpk 完整性验证 → attach-bundles 建 release + 附加 bundle
+3. 验证 release：Releases 页确认 bundle asset（x86/arm）齐全、tag 名带 `fnos-` 前缀
+4. NAS 实测自更新：守护调 `/api/update/check` 应返回新版本 → 下载 → 应用
+
+**已发布组合**：NAS 上运行 0.7.5 fpk（含 padding + 掉登录修复；联合号定版前构建，功能一致）。
 
 ---
 
@@ -240,7 +255,7 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 
 | 项 | 状态 | 说明 |
 |----|------|------|
-| 自更新通道 | ⏳ 等 release | 依赖 GitHub Release asset |
+| 自更新通道 | ⏳ 等首次发版 | 拦截已落地（只认 fnos-* release），随 fnos-0.7.5-1.5.2 发版启用 |
 | daemon 自保 | ⏳ | 应用中心层面，daemon 崩溃无自拉起 |
 | OAuth CORS | ⏳ | iframe 下可能失败（本次实测正常） |
 | UI 适配 | ⏳ | 标题栏裁切等 |

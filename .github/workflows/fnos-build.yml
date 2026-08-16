@@ -8,6 +8,9 @@ name: fnOS Build
 #   - workflow_dispatch：选 adapter 分支 + patch 分支 + 架构（版本矩阵构建）
 #   - push main：默认组合（adapter/v0.7.5 + patch）回归构建
 #   - push patch 分支：patch 业务变更 → 组合验证构建（patch 依赖校验 CI 化）
+#   - push fnos-* tag：发版（tag 命名空间隔离，2026-08-16）——发版 tag 统一
+#     fnos-<联合号>（如 fnos-0.7.5-1.5.2），与上游 fork 带来的 v* tags 不相交；
+#     上游 v* tag 即使被 push 也不会触发 fnOS 构建（release 语义归桌面 release.yml）。
 #
 # 流程：组合 checkout → 0 侵入验证（src == adapter 声明的上游 ref）→ patch 依赖校验
 #      （requires.api ≤ adapter apiVersion）→ apply-patches → build-fpk
@@ -16,7 +19,7 @@ name: fnOS Build
 on:
   push:
     branches: [main, patch]
-    tags: ["v*"]
+    tags: ["fnos-*"]
   workflow_dispatch:
     inputs:
       adapter:
@@ -197,10 +200,11 @@ jobs:
           if-no-files-found: error
 
   # 把更新 bundle 附加到 GitHub Release（daemon 自更新源 /api/update/check 拉取）
+  # 只在 fnos-* 发版 tag 触发（与 push 触发同源，2026-08-16 起 v* 不再进入本 workflow）
   attach-bundles:
     name: Attach fnOS update bundles to Release
     needs: build-fnos
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/fnos-')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
