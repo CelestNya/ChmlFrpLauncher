@@ -27,6 +27,10 @@ if [ -d "$REPO_ROOT/fnos-pack/patches" ]; then
 $(find "$REPO_ROOT/fnos-pack/patches" -name "*.patch" \
     -exec grep -hoP '^\+.*invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' {} + 2>/dev/null || true)"
 fi
+if [ -n "$CROP_PATCH" ] && [ -f "$CROP_PATCH" ]; then
+    USED_COMMANDS="$USED_COMMANDS
+$(grep -hoP '^\+.*invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' "$CROP_PATCH" 2>/dev/null || true)"
+fi
 USED_COMMANDS=$(echo "$USED_COMMANDS" | sort -u)
 echo "=== 实际 invoke 的命令（$(echo "$USED_COMMANDS" | wc -l) 个）==="
 echo "$USED_COMMANDS"
@@ -37,6 +41,12 @@ echo "$USED_COMMANDS"
 PY_MANIFEST="$ADAPTER_MANIFEST"
 if command -v cygpath >/dev/null 2>&1; then
     PY_MANIFEST=$(cygpath -w "$ADAPTER_MANIFEST")
+fi
+# 裁剪补丁（ui-crop.patch）由 adapter 分支持有（2026-08-16 决策：裁剪归 adapter，
+# patch 零裁剪代码）。路径从 manifest 的 uiCropPatch 声明读；组合构建态下在工作区可读。
+CROP_PATCH=$(python -c "import json,sys; m=json.load(open(r'$PY_MANIFEST')); print(m.get('uiCropPatch',''))" | tr -d '\r')
+if [ -n "$CROP_PATCH" ]; then
+    CROP_PATCH="$REPO_ROOT/fnos-api/$CROP_PATCH"
 fi
 IMPLEMENTED=$(python -c "import json,sys; m=json.load(open(r'$PY_MANIFEST')); print('\n'.join(m['capabilities']['commands']['implemented']))" | tr -d '\r')
 NOOP=$(python -c "import json,sys; m=json.load(open(r'$PY_MANIFEST')); print('\n'.join(m['capabilities']['commands']['noop']))" | tr -d '\r')
@@ -74,6 +84,10 @@ if [ -d "$REPO_ROOT/fnos-pack/patches" ]; then
     USED_KEYS="$USED_KEYS
 $(find "$REPO_ROOT/fnos-pack/patches" -name "*.patch" \
     -exec grep -hoP '^\+.*uiConfig\.\K[a-zA-Z0-9_]+' {} + 2>/dev/null || true)"
+fi
+if [ -n "$CROP_PATCH" ] && [ -f "$CROP_PATCH" ]; then
+    USED_KEYS="$USED_KEYS
+$(grep -hoP '^\+.*uiConfig\.\K[a-zA-Z0-9_]+' "$CROP_PATCH" 2>/dev/null || true)"
 fi
 USED_KEYS=$(echo "$USED_KEYS" | sort -u)
 MISSING_KEY=0
