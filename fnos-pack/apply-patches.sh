@@ -19,13 +19,18 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$REPO_ROOT/fnos-pack/lib.sh"
 # 功能 patch（patch 分支持有）
 FEATURE_PATCH_FILE="$REPO_ROOT/fnos-pack/patches/fnos-feature-patch.patch"
-# UI 裁剪 patch（adapter 分支持有；路径从 manifest 读，node 认 Git Bash 的 /d/ 路径）
+# UI 裁剪 patch（adapter 分支持有；路径从 manifest 读）
 ADAPTER_MANIFEST="$REPO_ROOT/fnos-api/adapters/v0.7.5/manifest.json"
 if [ ! -f "$ADAPTER_MANIFEST" ]; then
     echo "[fnos-pack] ❌ 缺少 adapter manifest（组合态缺失：请先 checkout adapter 分支的 fnos-api/）" >&2
     exit 1
 fi
-CROP_PATCH=$(node -e "console.log(require('$ADAPTER_MANIFEST').uiCropPatch || '')")
+# node -e 内嵌代码里的 /d/ 路径不走 MSYS 参数转换 → cygpath 转 Windows 路径（Windows 下）
+ADAPTER_MANIFEST_ABS="$ADAPTER_MANIFEST"
+if command -v cygpath >/dev/null 2>&1; then
+    ADAPTER_MANIFEST_ABS=$(cygpath -w "$ADAPTER_MANIFEST")
+fi
+CROP_PATCH=$(node -e "console.log(require(process.argv[1]).uiCropPatch || '')" "$ADAPTER_MANIFEST_ABS")
 if [ -z "$CROP_PATCH" ]; then
     echo "[fnos-pack] ❌ adapter manifest 未声明 uiCropPatch" >&2
     exit 1
