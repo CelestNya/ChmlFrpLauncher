@@ -59,7 +59,7 @@ index 3e48667..76d752f 100644
              isOpen={showCloseConfirmDialog}
              onClose={() => setShowCloseConfirmDialog(false)}
 diff --git a/src/components/pages/Settings/components/AppearanceSection.tsx b/src/components/pages/Settings/components/AppearanceSection.tsx
-index 69b973d..69800bd 100644
+index 69b973d..e07f753 100644
 --- a/src/components/pages/Settings/components/AppearanceSection.tsx
 +++ b/src/components/pages/Settings/components/AppearanceSection.tsx
 @@ -14,6 +14,7 @@ import type { ThemeMode, SidebarMode } from "../types";
@@ -95,6 +95,16 @@ index 69b973d..69800bd 100644
                      </>
                  ) : (
                      <Button
+@@ -307,7 +310,8 @@ export function AppearanceSection({isMacOS,
+             </ItemActions>
+           </Item>
+ 
+-          {backgroundImage && !isVideo && (
++          {/* fnOS：幻灯片间隔随「选择文件夹」一起裁剪（无文件夹轮播，间隔无意义） */}
++          {uiConfig.backgroundFolderImport && backgroundImage && !isVideo && (
+               <>
+                 <ItemSeparator />
+                 <Item variant="outline" className="border-0">
 diff --git a/src/components/pages/Settings/components/SystemSection.tsx b/src/components/pages/Settings/components/SystemSection.tsx
 index ca14adb..5cf28e8 100644
 --- a/src/components/pages/Settings/components/SystemSection.tsx
