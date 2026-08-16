@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # fnos-pack/gen-patch.sh
-# 从 patcher 分支生成 fnOS 前端 patch（ui + feature），覆盖 fnos-pack/patches/。
+# 从 patch 分支生成 fnOS 前端 patch（ui + feature），覆盖 fnos-pack/patches/。
 #
-# 用法（patcher 分支，仓库根目录执行）:
+# 用法（patch 分支 + 组合工作区：src 为应用态，仓库根目录执行）:
 #   bash fnos-pack/gen-patch.sh            # 用 origin/main（fork 主分支）作基线
 #   BASE=upstream/v0.7.5 bash fnos-pack/gen-patch.sh   # CI 用上游 v0.7.5 作基线（LTS）
 #
@@ -47,9 +47,9 @@ git rev-parse --verify "$BASE" >/dev/null 2>&1 || {
   exit 1
 }
 
-# 确保 patcher 分支在基线上（校验 src/ 差异可生成）
-if [ "$(git rev-parse --abbrev-ref HEAD)" != "patcher" ]; then
-  echo "[gen-patch] ⚠️ 当前分支非 patcher，请切换到 patcher 再生成" >&2
+# 确保在 patch 分支上（校验 src/ 差异可生成）
+if [ "$(git rev-parse --abbrev-ref HEAD)" != "patch" ]; then
+  echo "[gen-patch] ⚠️ 当前分支非 patch，请切换到 patch 再生成（分支矩阵拓扑）" >&2
   exit 1
 fi
 
@@ -76,7 +76,7 @@ if [ -n "$UNREGISTERED" ]; then
     echo "$UNREGISTERED" | sed 's/^/  /' >&2
     exit 1
 fi
-UNTRACKED="$(git status --porcelain src/ | grep '^??' || true)"
+UNTRACKED="$(git status --porcelain src/ | grep '^??' | grep -v 'fnos-ui-config.ts' || true)"
 if [ -n "$UNTRACKED" ]; then
     echo "[gen-patch] ❌ src/ 存在未跟踪文件（git diff 不捕获、不会进 patch）:" >&2
     echo "$UNTRACKED" | sed 's/^/  /' >&2
