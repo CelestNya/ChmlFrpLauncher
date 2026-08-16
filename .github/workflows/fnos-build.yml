@@ -20,16 +20,12 @@ on:
   workflow_dispatch:
     inputs:
       adapter:
-        description: adapter 分支（决定 src 基线 + API 契约版本）
-        type: choice
-        options:
-          - adapter/v0.7.5
+        description: adapter 分支（决定 src 基线 + API 契约版本；如 adapter/v0.7.5）
+        type: string
         default: adapter/v0.7.5
       patch:
-        description: patch 分支（fnOS 业务实现）
-        type: choice
-        options:
-          - patch
+        description: patch 分支（fnOS 业务实现；如 patch / patch-experimental）
+        type: string
         default: patch
       arch:
         description: 目标架构
