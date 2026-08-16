@@ -1,0 +1,35 @@
+[package]
+name = "chmlfrp-daemon"
+version = "0.7.5-1.5.3"
+description = "ChmlFrp fnOS 守护进程（axum 版隧道管理服务）"
+license = "Apache-2.0"
+edition = "2021"
+rust-version = "1.75"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1.48", features = ["full"] }
+tower-http = { version = "0.6", features = ["fs"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# reqwest 使用 rustls 而非 native-tls（openssl）：
+# - 消除 openssl 系统依赖，CI 交叉编译 aarch64 无需 arm64 openssl 工具链
+# - 与桌面版无关（daemon 独立 crate），契约不变
+reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls"] }
+futures-util = "0.3"
+sha2 = "0.10"
+hex = "0.4"
+strip-ansi-escapes = "0.2"
+chrono = "0.4"
+libc = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# 自更新（B5）：bundle 解包 + 监听端口复用（SO_REUSEPORT 供重启衔接）
+tar = "0.4"
+flate2 = "1"
+socket2 = { version = "0.5", features = ["all"] }
+# 壁纸 dataURL 解码（ADR-0004：fnOS 浏览器上传图片 → base64 落盘）
+base64 = "0.22"
+# 测试用：tokio test-util（start_paused 虚拟时钟，守护状态机时序测试）
+[dev-dependencies]
+tokio = { version = "1.48", features = ["test-util"] }

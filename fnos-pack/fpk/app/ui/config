@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "chmlfrp.Application": {
+            "title": "ChmlFrp 内网穿透",
+            "icon": "images/icon_{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/chmlfrp",
+            "gatewaySocket": "app.sock",
+            "url": "/app/chmlfrp",
+            "allUsers": true
+        }
+    }
+}

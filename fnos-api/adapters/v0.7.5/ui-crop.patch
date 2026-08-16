@@ -1,0 +1,253 @@
+diff --git a/src/App.tsx b/src/App.tsx
+index 3e48667..76d752f 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -25,6 +25,7 @@ import { BackgroundLayer } from "@/components/App/components/BackgroundLayer";
+ import { getInitialSidebarMode } from "@/components/pages/Settings/utils";
+ import type { SidebarMode } from "@/components/pages/Settings/types";
+ import { cn } from "@/lib/utils";
++import { uiConfig } from "@/fnos-ui-config";
+ 
+ function App() {
+   const [activeTab, setActiveTab] = useState("home");
+@@ -54,11 +55,13 @@ function App() {
+   const { updateInfo, setUpdateInfo } = useUpdateCheck();
+   const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
+ 
+-  // 常量计算
+-  const shouldShowTitleBar = isMacOS ? showTitleBar : isWindows ? showTitleBar : true;
+-  const isTitleBarHidden = (isMacOS || isWindows) && !showTitleBar;
+-  const shouldPadTop = shouldShowTitleBar || (isWindows && !showTitleBar);
+-  const SIDEBAR_LEFT = isMacOS && !showTitleBar ? 10 : 15;
++  // 常量计算（fnOS：uiConfig 裁剪标题栏相关 UI，平台分支随配置关闭）
++  const shouldShowTitleBar = uiConfig.titleBar ? (isMacOS ? showTitleBar : isWindows ? showTitleBar : true) : false;
++  const isTitleBarHidden = uiConfig.titleBar && (isMacOS || isWindows) && !showTitleBar;
++  // fnOS（uiConfig 裁剪标题栏）：iframe 无系统标题栏，内容区仍保留 padding，
++  // 否则创建隧道等按钮紧贴窗口上沿（美观度优化，2026-08-15）
++  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : true;
++  const SIDEBAR_LEFT = uiConfig.titleBar && isMacOS && !showTitleBar ? 10 : 15;
+   const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
+ 
+   // 主题与更新监听
+@@ -146,8 +149,8 @@ function App() {
+               onVideoLoadedData={handleVideoLoadedData}
+           />
+ 
+-          {shouldShowTitleBar && <div className="relative z-50"><TitleBar /></div>}
+-          {isWindows && !showTitleBar && (
++          {uiConfig.titleBar && shouldShowTitleBar && <div className="relative z-50"><TitleBar /></div>}
++          {uiConfig.titleBar && isWindows && !showTitleBar && (
+               <div data-tauri-drag-region className="absolute top-0 right-0 left-0 z-50 h-9 flex items-center justify-end pr-2">
+                 <WindowControls />
+               </div>
+@@ -200,7 +203,7 @@ function App() {
+                     userInfo={userInfo}
+                 />
+                 <div className="flex-1 flex flex-col overflow-hidden relative">
+-                  {isMacOS && !showTitleBar && <div data-tauri-drag-region className="h-8 flex-shrink-0 w-full" />}
++                  {isMacOS && uiConfig.titleBar && !showTitleBar && <div data-tauri-drag-region className="h-8 flex-shrink-0 w-full" />}
+                   <div className={`flex-1 overflow-auto px-6 pb-6 md:px-8 md:pb-8 ${shouldPadTop ? "pt-4 md:pt-6" : "pt-0"}`}>
+                     <div className="max-w-6xl mx-auto w-full h-full flex flex-col">{content}</div>
+                   </div>
+@@ -209,7 +212,7 @@ function App() {
+           )}
+         </div>
+ 
+-        <AntivirusWarningDialog isOpen={showAntivirusWarning} onClose={() => setShowAntivirusWarning(false)} onConfirm={() => setActiveTab("settings")} />
++        {uiConfig.antivirusWarningDialog && <AntivirusWarningDialog isOpen={showAntivirusWarning} onClose={() => setShowAntivirusWarning(false)} onConfirm={() => setActiveTab("settings")} />}
+         <CloseConfirmDialog
+             isOpen={showCloseConfirmDialog}
+             onClose={() => setShowCloseConfirmDialog(false)}
+diff --git a/src/components/pages/Settings/components/AppearanceSection.tsx b/src/components/pages/Settings/components/AppearanceSection.tsx
+index 69b973d..e07f753 100644
+--- a/src/components/pages/Settings/components/AppearanceSection.tsx
++++ b/src/components/pages/Settings/components/AppearanceSection.tsx
+@@ -14,6 +14,7 @@ import type { ThemeMode, SidebarMode } from "../types";
+ import type { EffectType } from "../utils";
+ import { getBackgroundType } from "../utils";
+ import React, { type RefObject } from "react";
++import { uiConfig } from "@/fnos-ui-config";
+ 
+ interface AppearanceSectionProps {
+   isMacOS: boolean;
+@@ -223,7 +224,7 @@ export function AppearanceSection({isMacOS,
+             </ItemActions>
+           </Item>
+ 
+-          {(isMacOS || isWindows) && sidebarMode === "classic" && (
++          {(isMacOS || isWindows) && sidebarMode === "classic" && uiConfig.titleBar && (
+               <>
+                 <ItemSeparator />
+                 <Item variant="outline" className="border-0">
+@@ -283,6 +284,7 @@ export function AppearanceSection({isMacOS,
+                       >
+                         选择文件
+                       </Button>
++                      {uiConfig.backgroundFolderImport && (
+                       <Button
+                           onClick={onSelectFolder}
+                           disabled={isSelectingImage}
+@@ -292,6 +294,7 @@ export function AppearanceSection({isMacOS,
+                       >
+                         选择文件夹
+                       </Button>
++                      )}
+                     </>
+                 ) : (
+                     <Button
+@@ -307,7 +310,8 @@ export function AppearanceSection({isMacOS,
+             </ItemActions>
+           </Item>
+ 
+-          {backgroundImage && !isVideo && (
++          {/* fnOS：幻灯片间隔随「选择文件夹」一起裁剪（无文件夹轮播，间隔无意义） */}
++          {uiConfig.backgroundFolderImport && backgroundImage && !isVideo && (
+               <>
+                 <ItemSeparator />
+                 <Item variant="outline" className="border-0">
+diff --git a/src/components/pages/Settings/components/SystemSection.tsx b/src/components/pages/Settings/components/SystemSection.tsx
+index ca14adb..5cf28e8 100644
+--- a/src/components/pages/Settings/components/SystemSection.tsx
++++ b/src/components/pages/Settings/components/SystemSection.tsx
+@@ -9,6 +9,7 @@ import {
+   ItemActions,
+   ItemSeparator,
+ } from "@/components/ui/item";
++import { uiConfig } from "@/fnos-ui-config";
+ 
+ interface SystemSectionProps {
+   autostartEnabled: boolean;
+@@ -50,35 +51,39 @@ export function SystemSection({
+         <span>系统</span>
+       </div>
+       <div className="rounded-lg bg-card overflow-hidden">
+-        <Item variant="outline" className="border-0">
+-          <ItemContent>
+-            <ItemTitle>开机自启</ItemTitle>
+-            <ItemDescription className="text-xs">
+-              系统启动时自动运行应用
+-            </ItemDescription>
+-          </ItemContent>
+-          <ItemActions>
+-            <button
+-              onClick={() => onToggleAutostart(!autostartEnabled)}
+-              disabled={autostartLoading}
+-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
+-                autostartEnabled
+-                  ? "bg-foreground"
+-                  : "bg-muted dark:bg-foreground/12"
+-              } ${autostartLoading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+-              role="switch"
+-              aria-checked={autostartEnabled}
+-            >
+-              <span
+-                className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
+-                  autostartEnabled ? "translate-x-6" : "translate-x-1"
+-                }`}
+-              />
+-            </button>
+-          </ItemActions>
+-        </Item>
++        {uiConfig.autostart && (
++          <>
++            <Item variant="outline" className="border-0">
++              <ItemContent>
++                <ItemTitle>开机自启</ItemTitle>
++                <ItemDescription className="text-xs">
++                  系统启动时自动运行应用
++                </ItemDescription>
++              </ItemContent>
++              <ItemActions>
++                <button
++                  onClick={() => onToggleAutostart(!autostartEnabled)}
++                  disabled={autostartLoading}
++                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
++                    autostartEnabled
++                      ? "bg-foreground"
++                      : "bg-muted dark:bg-foreground/12"
++                  } ${autostartLoading ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
++                  role="switch"
++                  aria-checked={autostartEnabled}
++                >
++                  <span
++                    className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
++                      autostartEnabled ? "translate-x-6" : "translate-x-1"
++                    }`}
++                  />
++                </button>
++              </ItemActions>
++            </Item>
+ 
+-        <ItemSeparator />
++            <ItemSeparator />
++          </>
++        )}
+ 
+         <Item variant="outline" className="border-0">
+           <ItemContent>
+@@ -109,34 +114,38 @@ export function SystemSection({
+ 
+         <ItemSeparator />
+ 
+-        <Item variant="outline" className="border-0">
+-          <ItemContent>
+-            <ItemTitle>关闭窗口时最小化到托盘</ItemTitle>
+-            <ItemDescription className="text-xs">
+-              关闭窗口后应用在后台运行，可从系统托盘打开
+-            </ItemDescription>
+-          </ItemContent>
+-          <ItemActions>
+-            <button
+-              onClick={() => onToggleCloseToTray(!closeToTrayEnabled)}
+-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
+-                closeToTrayEnabled
+-                  ? "bg-foreground"
+-                  : "bg-muted dark:bg-foreground/12"
+-              } cursor-pointer`}
+-              role="switch"
+-              aria-checked={closeToTrayEnabled}
+-            >
+-              <span
+-                className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
+-                  closeToTrayEnabled ? "translate-x-6" : "translate-x-1"
+-                }`}
+-              />
+-            </button>
+-          </ItemActions>
+-        </Item>
++        {uiConfig.closeToTray && (
++          <>
++            <Item variant="outline" className="border-0">
++              <ItemContent>
++                <ItemTitle>关闭窗口时最小化到托盘</ItemTitle>
++                <ItemDescription className="text-xs">
++                  关闭窗口后应用在后台运行，可从系统托盘打开
++                </ItemDescription>
++              </ItemContent>
++              <ItemActions>
++                <button
++                  onClick={() => onToggleCloseToTray(!closeToTrayEnabled)}
++                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors outline-none outline-0 ${
++                    closeToTrayEnabled
++                      ? "bg-foreground"
++                      : "bg-muted dark:bg-foreground/12"
++                  } cursor-pointer`}
++                  role="switch"
++                  aria-checked={closeToTrayEnabled}
++                >
++                  <span
++                    className={`inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform ${
++                      closeToTrayEnabled ? "translate-x-6" : "translate-x-1"
++                    }`}
++                  />
++                </button>
++              </ItemActions>
++            </Item>
+ 
+-        <ItemSeparator />
++            <ItemSeparator />
++          </>
++        )}
+ 
+         <Item variant="outline" className="border-0">
+           <ItemContent>
