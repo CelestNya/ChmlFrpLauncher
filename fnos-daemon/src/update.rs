@@ -491,6 +491,12 @@ mod tests {
         assert!(!version_compare("0.7.5", "0.7.5"));
         assert!(!version_compare("0.8.0", "0.7.5"));
         assert!(!version_compare("1.0.0", "1.0"));
+        // 联合版本号（app-patchSetVersion，单线版本策略，2026-08-16）：
+        // 0.8.0 release 前维护 0.7.5+patch 线；0.8.0 一出停旧线切新线。
+        assert!(version_compare("0.7.5-1.5.2", "0.7.5-1.6.0"), "同线 patch 升级");
+        assert!(version_compare("0.7.5-1.5.2", "0.8.0-1.0.0"), "单线切换（0.8.0 线）");
+        assert!(!version_compare("0.7.5-1.5.2", "0.7.5-1.5.2"));
+        assert!(!version_compare("0.8.0-1.0.0", "0.7.5-1.5.2"), "新线不得视为旧版本");
     }
 
     #[test]
