@@ -1,6 +1,9 @@
 //! 自更新（B5）：GitHub Releases 源 → 下载更新 bundle → sha256 校验 → 原子替换 → 重启。
 //!
-//! 更新源：`https://api.github.com/repos/CelestNya/ChmlFrpLauncher/releases/latest`
+//! 更新源：`https://api.github.com/repos/CelestNya/ChmlFrpLauncher/releases?per_page=100`（按时间倒序）
+//! 发布命名空间隔离（2026-08-16）：发版 tag 统一 `fnos-<联合号>`（如 fnos-0.7.5-1.5.2），
+//! 与上游 fork 带来的 `v*` tags 不相交。更新检查只认 `fnos-` 前缀的 release——
+//! 桌面 release、误 push 上游 tag 生成的 release 一律跳过（详见 fetch_latest_from）。
 //! 更新包（release asset）：`chmlfrp-fnos-{version}-{platform}.tar.gz`，平台 x86/arm。
 //! bundle 内部：
 //! ```text
@@ -23,8 +26,11 @@ use std::time::Instant;
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-const GITHUB_API_LATEST: &str =
-    "https://api.github.com/repos/CelestNya/ChmlFrpLauncher/releases/latest";
+/// fnOS release 列表（GitHub API 按创建时间倒序）。
+/// 不用 `releases/latest`：latest 是 fork 内所有正式 release 共用的指针，
+/// 任何其他 release（桌面版、误 push 上游 tag 触发生成）都会顶掉它，导致更新通道失效。
+const GITHUB_API_RELEASES: &str =
+    "https://api.github.com/repos/CelestNya/ChmlFrpLauncher/releases?per_page=100";
 const UPDATE_CACHE_SECS: u64 = 300;
 const BUNDLE_PREFIX: &str = "chmlfrp-fnos-";
 
@@ -94,9 +100,23 @@ fn version_compare(current: &str, remote: &str) -> bool {
     a.len() < b.len()
 }
 
-/// 查询最新 release 并匹配本平台 bundle。
+/// 查询最新 fnOS release 并匹配本平台 bundle。
 /// `UPDATE_API_URL` 环境变量可覆盖 GitHub API 地址（测试 / 自托管源 / 规避限流）。
 async fn fetch_latest(checker: &UpdateChecker, force: bool) -> Result<UpdateInfo, String> {
+    let api_url = std::env::var("UPDATE_API_URL")
+        .unwrap_or_else(|_| GITHUB_API_RELEASES.to_string());
+    fetch_latest_from(&api_url, checker, force).await
+}
+
+/// 核心检查：release 列表 → 只认 `fnos-` 前缀 → 匹配本平台 bundle。
+/// 拦截策略：桌面 release / 误 push 上游 tag 生成的 release（tag 为 `v*`）不含 fnOS bundle，
+/// 读 latest 会让它们抢占更新通道（静默失效）；改读列表并跳过非 `fnos-` release，
+/// 找不到任何 fnOS release 时返回「无更新」而非报错。
+async fn fetch_latest_from(
+    api_url: &str,
+    checker: &UpdateChecker,
+    force: bool,
+) -> Result<UpdateInfo, String> {
     // 缓存命中（5 分钟内）
     if !force {
         if let Ok(guard) = checker.inner.lock() {
@@ -109,9 +129,8 @@ async fn fetch_latest(checker: &UpdateChecker, force: bool) -> Result<UpdateInfo
     }
 
     let client = build_http_client(15)?;
-    let api_url = std::env::var("UPDATE_API_URL").unwrap_or_else(|_| GITHUB_API_LATEST.to_string());
     let resp = client
-        .get(&api_url)
+        .get(api_url)
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
@@ -119,37 +138,50 @@ async fn fetch_latest(checker: &UpdateChecker, force: bool) -> Result<UpdateInfo
     if !resp.status().is_success() {
         return Err(format!("GitHub API 返回 {}", resp.status()));
     }
-    let json: serde_json::Value = resp
+    let releases: Vec<serde_json::Value> = resp
         .json()
         .await
         .map_err(|e| format!("解析 GitHub 响应失败: {e}"))?;
+    if releases.is_empty() {
+        return Err("GitHub API 返回空 release 列表".to_string());
+    }
 
-    let tag = json["tag_name"].as_str().unwrap_or_default().to_string();
-    let version = tag.trim_start_matches('v').to_string();
     let platform = platform_suffix();
+    let current = env!("CARGO_PKG_VERSION");
 
-    // 匹配本平台 bundle asset：chmlfrp-fnos-{version}-{platform}.tar.gz
-    let mut matched: Option<(String, u64)> = None;
-    if let Some(assets) = json["assets"].as_array() {
-        for asset in assets {
-            let name = asset["name"].as_str().unwrap_or_default();
-            let target = format!("{BUNDLE_PREFIX}{version}-{platform}.tar.gz");
-            if name == target {
-                matched = Some((
-                    asset["browser_download_url"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
-                    asset["size"].as_u64().unwrap_or(0),
-                ));
-                break;
+    // 列表按创建时间倒序 → 第一个含本平台 bundle 的 fnOS release 即最新可用更新。
+    // 无 bundle 的 fnOS release（半成品发版）跳过，继续找下一个，不让它挡更新通道。
+    let mut matched: Option<(String, String, u64)> = None; // (version, url, size)
+    for release in &releases {
+        let tag = release["tag_name"].as_str().unwrap_or_default();
+        let Some(version) = tag.strip_prefix("fnos-") else {
+            continue; // 非 fnOS release（桌面版 / 误触发）→ 跳过
+        };
+        let version = version.trim_start_matches('v').to_string();
+        if let Some(assets) = release["assets"].as_array() {
+            for asset in assets {
+                let name = asset["name"].as_str().unwrap_or_default();
+                let target = format!("{BUNDLE_PREFIX}{version}-{platform}.tar.gz");
+                if name == target {
+                    matched = Some((
+                        version.clone(),
+                        asset["browser_download_url"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                        asset["size"].as_u64().unwrap_or(0),
+                    ));
+                    break;
+                }
             }
+        }
+        if matched.is_some() {
+            break;
         }
     }
 
-    let current = env!("CARGO_PKG_VERSION");
     let info = match matched {
-        Some((url, size)) => UpdateInfo {
+        Some((version, url, size)) => UpdateInfo {
             available: version_compare(current, &version),
             version: Some(version),
             url: Some(url),
@@ -580,5 +612,117 @@ mod tests {
         .unwrap();
         assert!(verify_bundle(&dir).is_err(), "缺 dist/ 应拒绝");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// 极简 mock GitHub API：一次连接返回一个固定 JSON 响应（releases 列表）。
+    async fn mock_api(body: String) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { break };
+                let mut buf = [0u8; 2048];
+                let _ = sock.read(&mut buf).await;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    fn fnos_release(tag: &str, asset_names: &[&str]) -> serde_json::Value {
+        serde_json::json!({
+            "tag_name": tag,
+            "assets": asset_names.iter().map(|name| serde_json::json!({
+                "name": name,
+                "browser_download_url": format!("https://download.example/{}", name),
+                "size": 12345,
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    /// 拦截策略（2026-08-16）：桌面 release / 误 push 上游 tag 生成的 release
+    /// （tag 为 `v*`）不得抢占 fnOS 更新通道——必须跳过并找到最新的 `fnos-` release。
+    #[tokio::test]
+    async fn 更新检查_跳过桌面release取最新fnos() {
+        let target = format!("chmlfrp-fnos-9.9.9-{}.tar.gz", platform_suffix());
+        let body = serde_json::json!([
+            // 桌面 release（无 fnOS bundle）→ 必须跳过
+            { "tag_name": "v0.7.5", "assets": [] },
+            fnos_release("fnos-9.9.9", &[&target]),
+        ])
+        .to_string();
+        let (url, server) = mock_api(body).await;
+        let info = fetch_latest_from(&url, &UpdateChecker::default(), true)
+            .await
+            .unwrap();
+        server.abort();
+        assert!(info.available, "应跳过桌面 release 找到 fnOS 更新");
+        assert_eq!(info.version.as_deref(), Some("9.9.9"));
+        let expected_url = format!("https://download.example/{target}");
+        assert_eq!(info.url.as_deref(), Some(expected_url.as_str()));
+    }
+
+    #[tokio::test]
+    async fn 更新检查_最新fnos无bundle则找下一个() {
+        let target = format!("chmlfrp-fnos-10.0.0-{}.tar.gz", platform_suffix());
+        let body = serde_json::json!([
+            // 最新 fnOS release 缺本平台 bundle（半成品发版）→ 跳过，取下一个
+            fnos_release("fnos-9.9.9", &[]),
+            fnos_release("fnos-10.0.0", &[&target]),
+        ])
+        .to_string();
+        let (url, server) = mock_api(body).await;
+        let info = fetch_latest_from(&url, &UpdateChecker::default(), true)
+            .await
+            .unwrap();
+        server.abort();
+        assert_eq!(info.version.as_deref(), Some("10.0.0"), "应跳过缺 bundle 的 release");
+        assert!(info.available);
+    }
+
+    #[tokio::test]
+    async fn 更新检查_只有桌面release视为无更新不报错() {
+        let body = serde_json::json!([
+            { "tag_name": "v0.7.5", "assets": [] },
+            { "tag_name": "v0.8.0", "assets": [] },
+        ])
+        .to_string();
+        let (url, server) = mock_api(body).await;
+        let info = fetch_latest_from(&url, &UpdateChecker::default(), true)
+            .await
+            .unwrap();
+        server.abort();
+        assert!(!info.available, "无 fnOS release 应返回无更新而非报错");
+        assert!(info.version.is_none());
+    }
+
+    #[tokio::test]
+    async fn 更新检查_平台bundle不匹配视为无更新() {
+        // 只有 arm 平台的 bundle，而本平台是 x86（或反之）→ 无匹配 → 无更新
+        let wrong = if platform_suffix() == "x86" { "arm" } else { "x86" };
+        let asset = format!("chmlfrp-fnos-9.9.9-{wrong}.tar.gz");
+        let body = serde_json::json!([fnos_release("fnos-9.9.9", &[&asset])]).to_string();
+        let (url, server) = mock_api(body).await;
+        let info = fetch_latest_from(&url, &UpdateChecker::default(), true)
+            .await
+            .unwrap();
+        server.abort();
+        assert!(!info.available, "平台不匹配应视为无更新");
+    }
+
+    #[tokio::test]
+    async fn 更新检查_空列表视为异常() {
+        let (url, server) = mock_api("[]".to_string()).await;
+        let result = fetch_latest_from(&url, &UpdateChecker::default(), true).await;
+        server.abort();
+        assert!(result.is_err(), "空 release 列表应报错（正常状态必有 release）");
     }
 }
