@@ -12,20 +12,25 @@
 **分支矩阵拓扑**：三套代码按生命周期分三组分支，构建时组合：
 
 ```
-main ──────────── 发布组合态：src（0 侵入，= adapter 声明的上游基线）+ docs + CI + 根文件
+main ──────────── 稳定发行版：src（0 侵入，跟随上游最新稳定版）+ 发版组合快照
+                    （fnos 目录，git add -f 提交，src 零变化）+ docs + CI
 adapter/<ver> ──── 每上游版本一个：fnos-api 契约（API.md + manifest + 校验/生成脚本）
+                    + ui-crop.patch（UI 裁剪，2026-08-16 起归 adapter）
                     adapterVersion = {基线版本}-{apiVersion}（如 0.7.5-1.0.0）
-patch ──────────── fnOS 业务实现：patches/*.patch + manifest（featureVersion + requires.api）
-                    + fnos-daemon + fnos-shim + 构建链（不含 src）
+patch ──────────── fnOS 业务实现：patches/*.patch（仅 feature）+ manifest（featureVersion
+                    + requires.api）+ fnos-daemon + fnos-shim + 构建链（不含 src）
 ```
 
 | 分支 | 内容 | 生命周期 |
 |---|---|---|
-| `main` | src/ 零改动（0 侵入）+ docs + CI | 发布组合态，随上游基线更新 |
-| `adapter/v0.7.5`（每上游版本） | 仅 fnos-api/（4 文件） | 随上游版本生灭；`upstream.ref` 声明 src 基线 |
+| `main` | src/ 零改动（0 侵入，**只随上游最新稳定版更新**）+ 发版快照（fnos 目录，**发版提交不碰 src**）+ docs + CI | 稳定发行版：上游发新稳定版 → src 切新基线；发版 → 组合快照提交 + tag |
+| `adapter/v0.7.5`（每上游版本） | 仅 fnos-api/（契约 + 裁剪） | 随上游版本生灭；`upstream.ref` 声明 src 基线 |
 | `patch` | fnos-pack/ + fnos-daemon/ + fnos-shim/ | 随 feat 演进；featureVersion 独立 |
 
 > **基线**：当前 LTS = 上游 v0.7.5 tag（2026-08-15 切回，develop 线暂停）。
+> **main 定位（2026-08-17 用户定论）**：main 跟随上游最新稳定版——src 只在「跟随上游」
+> 动作中更新（上游发新稳定版 → src 切新基线 + 换新 adapter）；发版提交只更新 fnos 目录
+> （`git add -f` 组合快照），src 零变化。
 > 0 侵入不变式：main 的 src/ 必须与 adapter manifest 声明的 `upstream.ref` 一致
 > （CI 组合时断言 `git diff --quiet upstream/v0.7.5 -- src/`）。
 
@@ -251,11 +256,20 @@ sudo appcenter-cli install-fpk /tmp/chmlfrp_X.Y.Z_x86.fpk --volume 1
 - 发版 tag：**`v<联合号>`**（如 `v0.7.5-1.5.2`），与上游 v* 风格一致；CI 触发 `v*-*` 按「带连字符」隔离——上游 v* tags（v0.7.5）无连字符，进不来
 - 上游 15 个 tags 不删不动：无 release 的 tag 不出现在 Releases 页，删了反而破坏上游对照；同步上游**只 fetch 不 push --tags**
 
-**发版 checklist**：
+**发版 checklist**（组合快照机制，2026-08-17 定版）：
 
-1. 实测稳定确认 → 在 main 打 tag：`git tag v<联合号> && git push origin v<联合号>`
-2. CI（fnos-build.yml `v*-*` 触发）：双架构构建 → fpk 完整性验证 → attach-bundles 建 release + 附加 bundle
-3. 验证 release：Releases 页确认 bundle asset（x86/arm）齐全、tag 名为 `v<联合号>`
+1. 实测稳定确认 → main 工作区组合 fnos 目录并提交快照（**src 零变化**）：
+   ```bash
+   git checkout main
+   git checkout adapter/v0.7.5 -- fnos-api/
+   git checkout patch -- fnos-pack/ fnos-daemon/ fnos-shim/
+   git reset -q
+   git add -f fnos-api fnos-pack fnos-daemon fnos-shim
+   git commit -m "release: v<联合号> 组合快照（src 不变，fnos 目录更新）"
+   git tag v<联合号> && git push origin main v<联合号>
+   ```
+2. push main → 回归构建（组合最新分支，发版前验证）；tag `v*-*` 触发 → **正式构建直接用快照**（Compose 跳过，不拉最新分支）→ fpk 完整性验证 → attach-bundles 建 release + 附加 bundle
+3. 验证 release：Releases 页确认 bundle asset（x86/arm）齐全、tag 名为 `v<联合号>`；`git show v<联合号>` 可复现完整组合源码
 4. NAS 实测自更新：守护调 `/api/update/check` 应返回新版本 → 下载 → 应用
 
 **已发布组合**：NAS 上运行 0.7.5 fpk（含 padding + 掉登录修复；联合号定版前构建，功能一致）。
