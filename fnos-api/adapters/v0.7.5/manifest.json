@@ -56,9 +56,10 @@
       "src/components/pages/Logs.tsx",
       "src/services/logStore.ts",
       "src/services/frpcManager.ts",
-      "src/lib/sound.ts"
+      "src/lib/sound.ts",
+      "src/services/api.ts"
     ],
-    "total": 12
+    "total": 13
   },
 
   "uiConfig": {
