@@ -16,6 +16,7 @@ name: fnOS Build
 on:
   push:
     branches: [main, patch]
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       adapter:
@@ -63,6 +64,7 @@ jobs:
           fetch-depth: 0
 
       # 组合：从 adapter/patch 分支拉对应目录进工作区（分支矩阵核心）
+      # fetch 后 remote-tracking ref（origin/<branch>）存在，checkout <tree-ish> -- <path> 取目录
       - name: Compose adapter + patch branches
         run: |
           set -euo pipefail
@@ -70,8 +72,8 @@ jobs:
           PATCH="${{ github.event.inputs.patch || 'patch' }}"
           echo "组合: adapter=$ADAPTER + patch=$PATCH"
           git fetch origin "$ADAPTER" "$PATCH"
-          git checkout "$ADAPTER" -- fnos-api/
-          git checkout "$PATCH" -- fnos-pack/ fnos-daemon/ fnos-shim/
+          git checkout "origin/$ADAPTER" -- fnos-api/
+          git checkout "origin/$PATCH" -- fnos-pack/ fnos-daemon/ fnos-shim/
 
           # src 基线由 adapter 声明的 upstream.ref 确定
           SRC_REF=$(python3 -c "import json; print(json.load(open('fnos-api/adapters/v0.7.5/manifest.json'))['upstream']['ref'])")
@@ -86,11 +88,6 @@ jobs:
           fi
           echo "✅ 0 侵入验证通过（src == upstream/$SRC_REF）"
 
-      # patch 依赖校验 CI 化：requires.api ≤ adapter apiVersion + 命令面/uiConfig 覆盖
-      - name: Verify adapter coverage & patch deps
-        run: |
-          bash fnos-api/verify-adapter.sh
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -101,6 +98,12 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      # patch 依赖校验 CI 化：requires.api ≤ adapter apiVersion + 命令面/uiConfig 覆盖
+      # （放在 Setup Node 之后：verify 的生成对比分支需要 node）
+      - name: Verify adapter coverage & patch deps
+        run: |
+          bash fnos-api/verify-adapter.sh
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -166,6 +169,20 @@ jobs:
         run: |
           bash fnos-pack/build-fpk.sh --arch ${{ matrix.arch }} --skip-frontend --bundle
 
+      # 产物真实性验证：fpk 必须含 daemon 二进制 + 前端 dist + manifest（防「构建成功但包不完整」）
+      - name: Verify fpk integrity
+        run: |
+          set -euo pipefail
+          FPK=$(ls dist-fpk/chmlfrp_*.fpk)
+          echo "fpk: $FPK ($(du -h "$FPK" | cut -f1))"
+          unzip -l "$FPK" | grep -E "chmlfrp-daemon|dist/index.html|manifest" | head -5
+          unzip -l "$FPK" | grep -q "chmlfrp-daemon" || { echo "❌ fpk 缺 daemon 二进制" >&2; exit 1; }
+          unzip -l "$FPK" | grep -q "dist/index.html" || { echo "❌ fpk 缺前端 dist" >&2; exit 1; }
+          # daemon 必须是静态链接（动态链接在 fnOS glibc 2.36 上加载即崩）
+          file fnos-daemon/target/${{ matrix.arch == 'x86_64' && 'x86_64-unknown-linux-musl' || 'aarch64-unknown-linux-musl' }}/release/chmlfrp-daemon | grep -Eq "statically linked|static-pie" || \
+            { echo "❌ daemon 非静态链接" >&2; exit 1; }
+          echo "✅ fpk 完整性验证通过"
+
       - name: Upload .fpk artifact
         uses: actions/upload-artifact@v4
         with:
@@ -196,6 +213,20 @@ jobs:
           pattern: chmlfrp-fnos-bundle-*
           merge-multiple: true
           path: bundles
+
+      # tag 触发时 release 可能不存在（桌面 release.yml 只管桌面产物）→ 先创建
+      - name: Create release if missing
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --title "fnOS $GITHUB_REF_NAME" \
+              --notes "fnOS 版（app + patch 联合版本号）。fpk 见 workflow artifacts；bundle 稍后附加。" || true
+            echo "✅ release $GITHUB_REF_NAME 已创建"
+          else
+            echo "release 已存在"
+          fi
 
       - name: Attach bundles to Release
         env:
