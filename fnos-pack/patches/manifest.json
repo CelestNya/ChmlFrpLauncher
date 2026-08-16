@@ -1,17 +1,18 @@
 {
-  "schemaVersion": 1,
-  "description": "fnOS patch 版本声明。featureVersion = patch 特性版本（功能演进，与 API 版本独立）；requires.api = 对 fnOS API 的硬依赖（构建期校验：requires.api ≤ adapter.apiVersion）。",
+  "schemaVersion": 2,
+  "patchSetVersion": "1.5.2",
+  "description": "fnOS patch 集版本声明。patchSetVersion 按「架构.功能.修复」定义（2026-08-16 用户决策）：架构（major）= 破坏性架构变更（uiConfig 格式/契约面/shim 重构）；功能（minor）= 新功能/能力一代 +1；修复（patch）= bug 修复 +1。E4 联合版本号 = app 版本 + patchSetVersion（如 0.7.5-1.5.2）。每个 patch 的 featureVersion 为其自身演进；requires.api = 对 fnOS API 的硬依赖（构建期校验：requires.api ≤ adapter.apiVersion）。",
   "patches": [
     {
       "file": "fnos-ui-patch.patch",
-      "featureVersion": "1.0.0",
-      "features": "UI 裁剪配置化（uiConfig 驱动条件渲染）：TitleBar/杀软弹窗/开机自启/托盘/文件夹导入",
+      "featureVersion": "1.0.1",
+      "features": "UI 裁剪配置化（uiConfig 驱动条件渲染）：TitleBar/杀软弹窗/开机自启/托盘/文件夹导入；iframe 内容 padding（修复）",
       "requires": { "api": ">=1.0.0" }
     },
     {
       "file": "fnos-feature-patch.patch",
-      "featureVersion": "1.0.0",
-      "features": "fnOS 功能：守护默认开启、WS 重连 replay 去重/静默、日志清空联动、壁纸砍轮播、音效网关前缀",
+      "featureVersion": "1.5.1",
+      "features": "功能 5 代：守护默认开启/WS 重连 replay 去重/日志清空联动/壁纸砍轮播/音效网关前缀；修复：掉登录（token 并发刷新）",
       "requires": { "api": ">=1.0.0" }
     }
   ]
