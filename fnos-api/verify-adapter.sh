@@ -123,14 +123,22 @@ if [ -f "$PATCH_MANIFEST" ]; then
         PY_PATCH_MANIFEST=$(cygpath -w "$PATCH_MANIFEST")
     fi
     python - "$PY_MANIFEST" "$PY_PATCH_MANIFEST" <<'PYEOF'
-import json, sys
+import json, sys, re
 
 def ver(v):
     return tuple(int(x) for x in v.strip().split("."))
 
 adapter = json.load(open(sys.argv[1]))
 api_version = ver(adapter["apiVersion"])
-patches = json.load(open(sys.argv[2]))["patches"]
+patch_manifest = json.load(open(sys.argv[2]))
+patches = patch_manifest["patches"]
+
+# patchSetVersion 格式校验：架构.功能.修复（三段数字，2026-08-16 用户决策）
+psv = patch_manifest.get("patchSetVersion")
+if not psv or not re.fullmatch(r"\d+\.\d+\.\d+", psv):
+    print(f"❌ patchSetVersion '{psv}' 非法（须为 架构.功能.修复 三段数字，如 1.5.2）", file=sys.stderr)
+    sys.exit(1)
+print(f"✅ patchSetVersion {psv}（架构.功能.修复）")
 
 ok = True
 for p in patches:
