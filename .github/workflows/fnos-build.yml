@@ -177,10 +177,13 @@ jobs:
           FPK=$(ls dist-fpk/chmlfrp_*.fpk)
           echo "fpk: $FPK ($(du -h "$FPK" | cut -f1))"
           gzip -t "$FPK" || { echo "❌ fpk gzip 完整性失败" >&2; exit 1; }
-          tar tzf "$FPK" | grep -q "manifest" || { echo "❌ fpk 缺 manifest" >&2; exit 1; }
-          tar tzf "$FPK" | grep -q "app.tgz" || { echo "❌ fpk 缺 app.tgz" >&2; exit 1; }
-          tar xOzf "$FPK" app.tgz | tar tz | grep -q "chmlfrp-daemon" || { echo "❌ app.tgz 缺 daemon 二进制" >&2; exit 1; }
-          tar xOzf "$FPK" app.tgz | tar tz | grep -q "dist/index.html" || { echo "❌ app.tgz 缺前端 dist" >&2; exit 1; }
+          echo "--- fpk tar 内容 ---"
+          tar tzf "$FPK" || true
+          echo "--- 检查关键文件 ---"
+          tar tzf "$FPK" 2>/dev/null | grep -q "manifest" || { echo "❌ fpk 缺 manifest" >&2; exit 1; }
+          tar tzf "$FPK" 2>/dev/null | grep -q "app.tgz" || { echo "❌ fpk 缺 app.tgz" >&2; exit 1; }
+          tar xOzf "$FPK" app.tgz 2>/dev/null | tar tz 2>/dev/null | grep -q "chmlfrp-daemon" || { echo "❌ app.tgz 缺 daemon 二进制" >&2; exit 1; }
+          tar xOzf "$FPK" app.tgz 2>/dev/null | tar tz 2>/dev/null | grep -q "dist/index.html" || { echo "❌ app.tgz 缺前端 dist" >&2; exit 1; }
           echo "✅ fpk 完整性验证通过（manifest + app.tgz[daemon/dist]）"
 
       - name: Upload .fpk artifact
