@@ -56,6 +56,13 @@ bash fnos-api/verify-adapter.sh   # 命令面 + uiConfig 键 + patch 依赖校�
 - **上游发新版（如 v0.8.0）**：新开 `adapter/v0.8.0` 分支（从 v0.7.5 分叉）→ diff 命令面/UI 适配点 → 更新能力面 → main src/ 切新基线 → CI 选新组合构建
 - **上游改动 patch 涉及文件** → apply-patches 的 dry-run 预检明确报错 → 在组合工作区人工合并后重新 gen-patch
 
+### 版本号规范（架构.功能.修复，2026-08-16 定版）
+
+- **patchSetVersion**（`fnos-pack/patches/manifest.json`）：架构（破坏性重构）.功能（新能力代）.修复（bug）
+- **E4 联合版本号** = app 版本 + patchSetVersion（如 `0.7.5-1.5.2`），同步四处：package.json / Cargo.toml / Cargo.lock / fpk manifest
+- **bump 必须带 commit 痕迹**：commit 标题标注新版本号（如 `feat(patch): 1.6.0 新增 XX`），并更新 manifest 的 versionHistory
+- 演进历史见 manifest `versionHistory` 字段
+
 ### 版本矩阵（CI 构建）
 
 `fnos-build.yml` workflow_dispatch：选 `adapter` 分支 + `patch` 分支 + 架构 → 组合构建。
