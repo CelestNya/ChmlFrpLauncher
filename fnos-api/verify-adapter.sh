@@ -14,6 +14,18 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADAPTER_MANIFEST="${1:-$REPO_ROOT/fnos-api/adapters/v0.7.5/manifest.json}"
 
+# 裁剪补丁（ui-crop.patch）由 adapter 分支持有（2026-08-16 决策：裁剪归 adapter，
+# patch 零裁剪代码）。路径从 manifest 的 uiCropPatch 声明读；组合构建态下在工作区可读。
+# Windows 下 python 不认 Git Bash 的 /d/ 路径 → cygpath 转成 D:\（与 PY_MANIFEST 同款）。
+PY_CROP_MANIFEST="$ADAPTER_MANIFEST"
+if command -v cygpath >/dev/null 2>&1; then
+    PY_CROP_MANIFEST=$(cygpath -w "$ADAPTER_MANIFEST")
+fi
+CROP_PATCH=$(python -c "import json,sys; m=json.load(open(r'$PY_CROP_MANIFEST')); print(m.get('uiCropPatch',''))" | tr -d '\r')
+if [ -n "$CROP_PATCH" ]; then
+    CROP_PATCH="$REPO_ROOT/fnos-api/$CROP_PATCH"
+fi
+
 echo "[verify-adapter] 校验 adapter: $ADAPTER_MANIFEST"
 
 # 1. 扫描调用命令（排除 plugin: 前缀，仅业务命令）
@@ -41,12 +53,6 @@ echo "$USED_COMMANDS"
 PY_MANIFEST="$ADAPTER_MANIFEST"
 if command -v cygpath >/dev/null 2>&1; then
     PY_MANIFEST=$(cygpath -w "$ADAPTER_MANIFEST")
-fi
-# 裁剪补丁（ui-crop.patch）由 adapter 分支持有（2026-08-16 决策：裁剪归 adapter，
-# patch 零裁剪代码）。路径从 manifest 的 uiCropPatch 声明读；组合构建态下在工作区可读。
-CROP_PATCH=$(python -c "import json,sys; m=json.load(open(r'$PY_MANIFEST')); print(m.get('uiCropPatch',''))" | tr -d '\r')
-if [ -n "$CROP_PATCH" ]; then
-    CROP_PATCH="$REPO_ROOT/fnos-api/$CROP_PATCH"
 fi
 IMPLEMENTED=$(python -c "import json,sys; m=json.load(open(r'$PY_MANIFEST')); print('\n'.join(m['capabilities']['commands']['implemented']))" | tr -d '\r')
 NOOP=$(python -c "import json,sys; m=json.load(open(r'$PY_MANIFEST')); print('\n'.join(m['capabilities']['commands']['noop']))" | tr -d '\r')
