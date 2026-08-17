@@ -1,5 +1,5 @@
 appname               = chmlfrp
-version               = 0.7.5-1.6.0
+version               = 0.7.5-1.6.1
 display_name          = ChmlFrp 内网穿透
 desc                  = ChmlFrp 内网穿透客户端，管理 frpc 隧道映射与进程守护。
 platform              = x86
