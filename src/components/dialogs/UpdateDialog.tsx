@@ -237,7 +237,8 @@ export function UpdateDialog({
                   <div className="text-sm font-medium text-destructive">
                     更新失败，可重试
                   </div>
-                  <div className="text-xs text-muted-foreground break-all leading-relaxed">
+                  {/* 聚合错误可能很长（多源原因），限高滚动防裁切（overflow-hidden 容器） */}
+                  <div className="text-xs text-muted-foreground break-all leading-relaxed max-h-32 overflow-y-auto pr-1">
                     {error}
                   </div>
                 </div>
