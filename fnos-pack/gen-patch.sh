@@ -53,6 +53,16 @@ fi
 
 # 生成 crop patch（UI 裁剪，git 双树格式，patch -p1 可应用）
 git diff "$BASE" -- "${UI_FILES[@]}" > "$CROP_OUT"
+# E9：crop 手工维护项保护（2026-08-18 二次回归教训）——crop 的差异源在 patcher，
+# 但 adapter 分支有手工覆盖（App.tsx shouldPadTop=: true 等，patcher 无此代码）。
+# gen-patch 全量重新生成会静默冲掉手工项——生成后必须校验保留，丢失即报错拦截。
+if grep -q "内容区仍保留 padding" "$CROP_OUT" 2>/dev/null; then
+  :
+else
+  echo "[gen-patch] ❌ crop 丢失手工维护项（App.tsx shouldPadTop=: true，标记'内容区仍保留 padding'）" >&2
+  echo "[gen-patch]    从 adapter 分支恢复手工段后重试（勿直接覆盖提交）" >&2
+  exit 1
+fi
 # 生成 feature patch
 git diff "$BASE" -- "${FEATURE_FILES[@]}" > "$PATCH_DIR/fnos-feature-patch.patch"
 
