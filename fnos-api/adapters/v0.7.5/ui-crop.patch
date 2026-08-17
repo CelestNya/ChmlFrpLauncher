@@ -1,5 +1,5 @@
 diff --git a/src/App.tsx b/src/App.tsx
-index 3e48667..76d752f 100644
+index 3e48667..42ee328 100644
 --- a/src/App.tsx
 +++ b/src/App.tsx
 @@ -25,6 +25,7 @@ import { BackgroundLayer } from "@/components/App/components/BackgroundLayer";
@@ -10,7 +10,7 @@ index 3e48667..76d752f 100644
  
  function App() {
    const [activeTab, setActiveTab] = useState("home");
-@@ -54,11 +55,13 @@ function App() {
+@@ -54,11 +55,11 @@ function App() {
    const { updateInfo, setUpdateInfo } = useUpdateCheck();
    const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
  
@@ -22,14 +22,42 @@ index 3e48667..76d752f 100644
 +  // 常量计算（fnOS：uiConfig 裁剪标题栏相关 UI，平台分支随配置关闭）
 +  const shouldShowTitleBar = uiConfig.titleBar ? (isMacOS ? showTitleBar : isWindows ? showTitleBar : true) : false;
 +  const isTitleBarHidden = uiConfig.titleBar && (isMacOS || isWindows) && !showTitleBar;
-+  // fnOS（uiConfig 裁剪标题栏）：iframe 无系统标题栏，内容区仍保留 padding，
-+  // 否则创建隧道等按钮紧贴窗口上沿（美观度优化，2026-08-15）
-+  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : true;
++  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : false;
 +  const SIDEBAR_LEFT = uiConfig.titleBar && isMacOS && !showTitleBar ? 10 : 15;
    const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
  
    // 主题与更新监听
-@@ -146,8 +149,8 @@ function App() {
+@@ -100,17 +101,26 @@ function App() {
+ 
+   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
+   const [downloadProgress, setDownloadProgress] = useState(0);
++  const [updateStage, setUpdateStage] = useState<string>("");
++  const [updateError, setUpdateError] = useState<string>("");
+ 
+   const handleUpdate = useCallback(async () => {
+     if (!updateInfo) return;
+     setIsDownloadingUpdate(true);
+     setDownloadProgress(0);
++    setUpdateStage("");
++    setUpdateError("");
+     try {
+-      await updateService.installUpdate((p) => setDownloadProgress(p));
+-      toast.success("更新已下载完成，重启后生效");
++      await updateService.installUpdate((p, stage) => {
++        setDownloadProgress(p);
++        if (stage) setUpdateStage(stage);
++      });
++      toast.success("更新已下载完成，正在自动刷新…");
+       setUpdateInfo(null);
+     } catch (e) {
+-      toast.error(`更新失败: ${String(e)}`);
++      const errorMsg = e instanceof Error ? e.message : String(e);
++      setUpdateError(errorMsg);
++      toast.error(`更新失败: ${errorMsg}`);
+     } finally {
+       setIsDownloadingUpdate(false);
+     }
+@@ -146,8 +156,8 @@ function App() {
                onVideoLoadedData={handleVideoLoadedData}
            />
  
@@ -40,7 +68,7 @@ index 3e48667..76d752f 100644
                <div data-tauri-drag-region className="absolute top-0 right-0 left-0 z-50 h-9 flex items-center justify-end pr-2">
                  <WindowControls />
                </div>
-@@ -200,7 +203,7 @@ function App() {
+@@ -200,7 +210,7 @@ function App() {
                      userInfo={userInfo}
                  />
                  <div className="flex-1 flex flex-col overflow-hidden relative">
@@ -49,7 +77,7 @@ index 3e48667..76d752f 100644
                    <div className={`flex-1 overflow-auto px-6 pb-6 md:px-8 md:pb-8 ${shouldPadTop ? "pt-4 md:pt-6" : "pt-0"}`}>
                      <div className="max-w-6xl mx-auto w-full h-full flex flex-col">{content}</div>
                    </div>
-@@ -209,7 +212,7 @@ function App() {
+@@ -209,7 +219,7 @@ function App() {
            )}
          </div>
  
@@ -58,8 +86,119 @@ index 3e48667..76d752f 100644
          <CloseConfirmDialog
              isOpen={showCloseConfirmDialog}
              onClose={() => setShowCloseConfirmDialog(false)}
+@@ -221,6 +231,7 @@ function App() {
+                 isOpen={!!updateInfo} onClose={() => !isDownloadingUpdate && setUpdateInfo(null)}
+                 onUpdate={handleUpdate} version={updateInfo.version} date={updateInfo.date} body={updateInfo.body}
+                 isDownloading={isDownloadingUpdate} downloadProgress={downloadProgress}
++                stage={updateStage} error={updateError}
+             />
+         )}
+       </>
+diff --git a/src/components/dialogs/UpdateDialog.tsx b/src/components/dialogs/UpdateDialog.tsx
+index beb9f62..aaff889 100644
+--- a/src/components/dialogs/UpdateDialog.tsx
++++ b/src/components/dialogs/UpdateDialog.tsx
+@@ -1,4 +1,4 @@
+-import { Download, Clock, Sparkles } from "lucide-react";
++import { Download, Clock, Sparkles, AlertTriangle } from "lucide-react";
+ import {
+   Dialog,
+   DialogContent,
+@@ -20,6 +20,24 @@ interface UpdateDialogProps {
+   body?: string;
+   isDownloading?: boolean;
+   downloadProgress?: number;
++  /** fnOS：daemon 推送的下载阶段（connecting/downloading/verifying/applying） */
++  stage?: string;
++  /** 下载/应用失败的错误信息（isDownloading=false 时展示重试态） */
++  error?: string;
++}
++
++/** 阶段文案映射（fnOS：进度不止下载段，含连接/校验/应用） */
++function stageText(stage: string | undefined): string {
++  switch (stage) {
++    case "connecting":
++      return "正在连接下载源…";
++    case "verifying":
++      return "正在校验更新包…";
++    case "applying":
++      return "正在应用更新，服务即将重启…";
++    default:
++      return "正在下载更新...";
++  }
+ }
+ 
+ function renderMarkdown(text: string): string {
+@@ -122,8 +140,14 @@ export function UpdateDialog({
+   body,
+   isDownloading = false,
+   downloadProgress = 0,
++  stage,
++  error,
+ }: UpdateDialogProps) {
+   const markdownContent = body ? renderMarkdown(body) : "";
++  // 校验/应用阶段进度条定格 100%（下载已完成）
++  const displayProgress =
++    stage === "verifying" || stage === "applying" ? 100 : downloadProgress;
++  const showRetry = !isDownloading && !!error;
+ 
+   return (
+     <Dialog
+@@ -188,23 +212,40 @@ export function UpdateDialog({
+                   <div className="flex items-center gap-2">
+                     <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                     <span className="text-foreground font-medium">
+-                      正在下载更新...
++                      {stageText(stage)}
+                     </span>
+                   </div>
+                   <span className="text-muted-foreground font-mono">
+-                    {downloadProgress.toFixed(0)}%
++                    {displayProgress.toFixed(0)}%
+                   </span>
+                 </div>
+                 <div className="w-full bg-muted/50 rounded-full h-2.5 overflow-hidden">
+                   <div
+                     className="bg-gradient-to-r from-primary to-primary/80 h-full rounded-full shadow-sm"
+-                    style={{ width: `${downloadProgress}%` }}
++                    style={{ width: `${displayProgress}%` }}
+                   />
+                 </div>
+               </div>
+             </div>
+           )}
+ 
++          {showRetry && (
++            <div className="px-6 py-4 border-t border-border/50 flex-shrink-0">
++              <div className="flex items-start gap-2.5 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
++                <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
++                <div className="min-w-0 space-y-1">
++                  <div className="text-sm font-medium text-destructive">
++                    更新失败，可重试
++                  </div>
++                  {/* 聚合错误可能很长（多源原因），限高滚动防裁切（overflow-hidden 容器） */}
++                  <div className="text-xs text-muted-foreground break-all leading-relaxed max-h-32 overflow-y-auto pr-1">
++                    {error}
++                  </div>
++                </div>
++              </div>
++            </div>
++          )}
++
+           <DialogFooter className="px-6 py-4 border-t border-border/50 bg-muted/20 z-10 flex items-center justify-between gap-3 flex-shrink-0">
+             <div className="flex items-center gap-3 w-full sm:w-auto sm:ml-auto">
+               <Button
+@@ -221,7 +262,7 @@ export function UpdateDialog({
+                 className="flex items-center gap-2 flex-1 sm:flex-initial bg-primary hover:bg-primary/90 shadow-sm"
+               >
+                 <Download className="w-4 h-4" />
+-                立即更新
++                {showRetry ? "重试" : "立即更新"}
+               </Button>
+             </div>
+           </DialogFooter>
 diff --git a/src/components/pages/Settings/components/AppearanceSection.tsx b/src/components/pages/Settings/components/AppearanceSection.tsx
-index 69b973d..e07f753 100644
+index 69b973d..69800bd 100644
 --- a/src/components/pages/Settings/components/AppearanceSection.tsx
 +++ b/src/components/pages/Settings/components/AppearanceSection.tsx
 @@ -14,6 +14,7 @@ import type { ThemeMode, SidebarMode } from "../types";
@@ -95,16 +234,6 @@ index 69b973d..e07f753 100644
                      </>
                  ) : (
                      <Button
-@@ -307,7 +310,8 @@ export function AppearanceSection({isMacOS,
-             </ItemActions>
-           </Item>
- 
--          {backgroundImage && !isVideo && (
-+          {/* fnOS：幻灯片间隔随「选择文件夹」一起裁剪（无文件夹轮播，间隔无意义） */}
-+          {uiConfig.backgroundFolderImport && backgroundImage && !isVideo && (
-               <>
-                 <ItemSeparator />
-                 <Item variant="outline" className="border-0">
 diff --git a/src/components/pages/Settings/components/SystemSection.tsx b/src/components/pages/Settings/components/SystemSection.tsx
 index ca14adb..5cf28e8 100644
 --- a/src/components/pages/Settings/components/SystemSection.tsx
@@ -251,3 +380,50 @@ index ca14adb..5cf28e8 100644
  
          <Item variant="outline" className="border-0">
            <ItemContent>
+diff --git a/src/components/pages/Settings/index.tsx b/src/components/pages/Settings/index.tsx
+index 820c705..5154510 100644
+--- a/src/components/pages/Settings/index.tsx
++++ b/src/components/pages/Settings/index.tsx
+@@ -74,6 +74,8 @@ export function Settings() {
+ 
+   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
+   const [downloadProgress, setDownloadProgress] = useState(0);
++  const [updateStage, setUpdateStage] = useState<string>("");
++  const [updateError, setUpdateError] = useState<string>("");
+ 
+   const { isDownloading, handleRedownloadFrpc } = useFrpcDownload();
+ 
+@@ -175,18 +177,22 @@ export function Settings() {
+ 
+     setIsDownloadingUpdate(true);
+     setDownloadProgress(0);
++    setUpdateStage("");
++    setUpdateError("");
+ 
+     try {
+-      await updateService.installUpdate((progress) => {
++      await updateService.installUpdate((progress, stage) => {
+         setDownloadProgress(progress);
++        if (stage) setUpdateStage(stage);
+       });
+-      toast.success("更新已下载完成，应用将在重启后更新", {
++      toast.success("更新已下载完成，正在自动刷新…", {
+         duration: 5000,
+       });
+       setUpdateInfo(null);
+       setIsDownloadingUpdate(false);
+     } catch (error) {
+       const errorMsg = error instanceof Error ? error.message : String(error);
++      setUpdateError(errorMsg);
+       toast.error(`下载更新失败: ${errorMsg}`, {
+         duration: 5000,
+       });
+@@ -283,6 +289,8 @@ export function Settings() {
+           body={updateInfo.body}
+           isDownloading={isDownloadingUpdate}
+           downloadProgress={downloadProgress}
++          stage={updateStage}
++          error={updateError}
+         />
+       )}
+     </div>

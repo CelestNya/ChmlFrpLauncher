@@ -16,6 +16,8 @@
 //! 本模块报明确错误并提示手动更新（plan 待验证清单第 4 条）。
 
 use crate::config::DaemonConfig;
+use crate::events::{DownloadProgress, DownloadResult, Event};
+use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -172,40 +174,145 @@ async fn fetch_latest(checker: &UpdateChecker, force: bool) -> Result<UpdateInfo
 /// GET /api/update/check —— 检查是否有可用更新。
 pub async fn handle_check(
     axum::extract::State(state): axum::extract::State<crate::AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::Json<serde_json::Value> {
-    match fetch_latest(&state.update, false).await {
+    // force=1：绕过 5 分钟缓存（用户主动检查/点更新时拿最新状态；
+    // 2026-08-18 检验发现：缓存旧提示与更新源不一致会误导下载）
+    let force = params.get("force").map(|v| v == "1" || v == "true").unwrap_or(false);
+    match fetch_latest(&state.update, force).await {
         Ok(info) => axum::Json(serde_json::json!({ "ok": true, "data": info })),
         Err(e) => axum::Json(serde_json::json!({ "ok": false, "error": e })),
     }
 }
 
-/// POST /api/update/download —— 下载并校验更新 bundle。
+/// POST /api/update/download —— 开始下载（异步：立即返回，结果经 download-result 事件推送）。
+///
+/// 2026-08-18 实测：fnOS 网关对应用请求有转发超时（504 Gateway Timeout）——
+/// 同步等待下载（含失败路径的逐源退避）必然超时，前端收到网关 HTML 错误页
+/// （「Unexpected token <html>」）。下载改为 tokio 后台任务 + 事件推送，
+/// 网关只承担瞬时请求；进度仍由 download-progress 事件驱动。
 pub async fn handle_download(
     axum::extract::State(state): axum::extract::State<crate::AppState>,
 ) -> axum::Json<serde_json::Value> {
-    match download_update(&state.cfg, &state.update).await {
-        Ok(staged) => axum::Json(serde_json::json!({
-            "ok": true,
-            "data": staged.to_string_lossy()
-        })),
-        Err(e) => axum::Json(serde_json::json!({ "ok": false, "error": e })),
-    }
+    let cfg = state.cfg.clone();
+    let checker = state.update.clone();
+    let event_tx = state.events.clone();
+    tokio::spawn(run_download_task(cfg, checker, event_tx));
+    axum::Json(serde_json::json!({ "ok": true, "data": "下载已开始" }))
+}
+
+/// 下载任务主体：执行下载并广播 download-result 事件（handle_download spawn 此函数）。
+pub async fn run_download_task(
+    cfg: Arc<crate::config::DaemonConfig>,
+    checker: UpdateChecker,
+    event_tx: broadcast::Sender<Event>,
+) {
+    let result = match download_update(&cfg, &checker, &event_tx).await {
+        Ok(staged) => DownloadResult {
+            ok: true,
+            staged: Some(staged.to_string_lossy().to_string()),
+            error: None,
+        },
+        Err(e) => DownloadResult {
+            ok: false,
+            staged: None,
+            error: Some(e),
+        },
+    };
+    let _ = event_tx.send(Event::download_result(result));
 }
 
 /// POST /api/update/apply —— 应用更新并重启。
 pub async fn handle_apply(
     axum::extract::State(state): axum::extract::State<crate::AppState>,
 ) -> axum::Json<serde_json::Value> {
-    match apply_update(&state.cfg, &state.shutdown) {
+    match apply_update(&state.cfg, &state.shutdown, &state.events) {
         Ok(()) => axum::Json(serde_json::json!({ "ok": true, "data": "更新已应用，服务重启中" })),
         Err(e) => axum::Json(serde_json::json!({ "ok": false, "error": e })),
     }
+}
+
+/// 下载镜像前缀（2026-08-17 用户反馈：下载实现线路优选与失败退避）。
+/// 空串 = 官方源（第一优先）；其余为国内可达的 GitHub 加速镜像。
+const MIRROR_PREFIXES: &[&str] = &[
+    "",
+    "https://ghproxy.com/",
+    "https://mirror.ghproxy.com/",
+    "https://gh-proxy.com/",
+];
+
+/// 由原始 URL 生成候选下载地址（官方 + 镜像）。
+fn mirror_urls(original: &str) -> Vec<String> {
+    MIRROR_PREFIXES
+        .iter()
+        .map(|p| format!("{p}{original}"))
+        .collect()
+}
+
+/// 按序尝试多个下载源：成功即返回（字节 + 内容长度）；源间 300ms 退避，
+/// 全部失败返回聚合错误（含每个源的失败原因）。
+async fn download_from_sources(
+    client: &reqwest::Client,
+    sources: &[String],
+    event_tx: &tokio::sync::broadcast::Sender<Event>,
+) -> Result<(Vec<u8>, u64), String> {
+    let mut errors: Vec<String> = Vec::new();
+    for (i, source) in sources.iter().enumerate() {
+        let resp = match client.get(source).send().await {
+            Ok(r) if r.status().is_success() => r,
+            Ok(r) => {
+                errors.push(format!("{source} 返回 {}", r.status()));
+                if i + 1 < sources.len() {
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                }
+                continue;
+            }
+            Err(e) => {
+                errors.push(format!("{source} 连接失败: {e}"));
+                if i + 1 < sources.len() {
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                }
+                continue;
+            }
+        };
+        let total = resp.content_length().unwrap_or(0);
+        let mut stream = resp.bytes_stream();
+        let mut bytes: Vec<u8> = Vec::with_capacity(total.min(64 * 1024 * 1024) as usize);
+        let mut downloaded: u64 = 0;
+        let mut last_pct: u64 = 0;
+        // 阶段：下载中（逐 chunk 累计，按百分比节流发进度事件）
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("下载中断: {e}"))?;
+            downloaded += chunk.len() as u64;
+            bytes.extend_from_slice(&chunk);
+            if total > 0 {
+                let pct = (downloaded * 100).checked_div(total).unwrap_or(0);
+                if pct != last_pct {
+                    last_pct = pct;
+                    let _ = event_tx.send(Event::download_progress(DownloadProgress {
+                        downloaded,
+                        total,
+                        percentage: pct as f64,
+                        stage: "downloading".to_string(),
+                    }));
+                }
+            }
+        }
+        info!("下载成功: {source} ({downloaded} 字节)");
+        return Ok((bytes, total));
+    }
+    Err(match errors.len() {
+        0 => "无可用下载源".to_string(),
+        1 => errors.into_iter().next().unwrap(),
+        _ => format!("所有下载源均失败: {}", errors.join("；")),
+    })
 }
 
 /// 查询最新 release 并匹配本平台 bundle。
 pub async fn download_update(
     cfg: &DaemonConfig,
     checker: &UpdateChecker,
+    event_tx: &tokio::sync::broadcast::Sender<Event>,
 ) -> Result<PathBuf, String> {
     let info = fetch_latest(checker, false).await?;
     if !info.available {
@@ -227,19 +334,25 @@ pub async fn download_update(
 
     let bundle_path = update_dir.join(format!("{BUNDLE_PREFIX}{version}-{platform}.tar.gz"));
     let client = build_http_client(120)?;
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("下载更新包失败: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("下载更新包返回 {}", resp.status()));
-    }
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("读取更新包失败: {e}"))?;
+
+    // 阶段：连接中（网络实时状态；此后 download_from_sources 内发 downloading 进度）
+    let _ = event_tx.send(Event::download_progress(DownloadProgress {
+        downloaded: 0,
+        total: 0,
+        percentage: 0.0,
+        stage: "connecting".to_string(),
+    }));
+
+    let (bytes, _) = download_from_sources(&client, &mirror_urls(&url), event_tx).await?;
     std::fs::write(&bundle_path, &bytes).map_err(|e| format!("写入更新包失败: {e}"))?;
+
+    // 阶段：校验中
+    let _ = event_tx.send(Event::download_progress(DownloadProgress {
+        downloaded: bytes.len() as u64,
+        total: bytes.len() as u64,
+        percentage: 100.0,
+        stage: "verifying".to_string(),
+    }));
 
     // 解包到 staged
     unpack_tar_gz(&bundle_path, &staged)?;
@@ -256,7 +369,14 @@ pub async fn download_update(
 pub fn apply_update(
     cfg: &DaemonConfig,
     shutdown_tx: &broadcast::Sender<()>,
+    event_tx: &tokio::sync::broadcast::Sender<Event>,
 ) -> Result<(), String> {
+    let _ = event_tx.send(Event::download_progress(DownloadProgress {
+        downloaded: 0,
+        total: 0,
+        percentage: 0.0,
+        stage: "applying".to_string(),
+    }));
     let staged = cfg.data_dir.join("update").join("staged");
     if !staged.join("chmlfrp-daemon").exists() {
         return Err("未找到已下载的更新（请先执行 download）".to_string());
@@ -586,5 +706,256 @@ mod tests {
         .unwrap();
         assert!(verify_bundle(&dir).is_err(), "缺 dist/ 应拒绝");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// 极简 mock HTTP server：返回指定状态码 + body（一次连接一个请求）。
+    async fn mock_api_with(status: u16, body: String) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { break };
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf).await;
+                let reason = if status == 200 { "OK" } else { "ERR" };
+                let resp = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    /// 多源退避（2026-08-17）：首源失败应自动切换下一源。
+    #[tokio::test]
+    async fn 下载多源切换_首源失败自动切下一源() {
+        let (url_a, server_a) = mock_api_with(500, String::new()).await;
+        let (url_b, server_b) = mock_api_with(200, "bundle-bytes".to_string()).await;
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        let client = build_http_client(15).unwrap();
+        let sources = vec![format!("{url_a}/b.tgz"), format!("{url_b}/b.tgz")];
+        let (bytes, total) = download_from_sources(&client, &sources, &tx)
+            .await
+            .unwrap();
+        server_a.abort();
+        server_b.abort();
+        assert_eq!(bytes, b"bundle-bytes", "应切换到第二源下载成功");
+        assert_eq!(total, 12);
+    }
+
+    /// 全部源失败应返回聚合错误（含各源失败原因）。
+    #[tokio::test]
+    async fn 下载全部源失败返回聚合错误() {
+        let (url_a, server_a) = mock_api_with(500, String::new()).await;
+        let (url_b, server_b) = mock_api_with(404, String::new()).await;
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        let client = build_http_client(15).unwrap();
+        let sources = vec![format!("{url_a}/b.tgz"), format!("{url_b}/b.tgz")];
+        let err = download_from_sources(&client, &sources, &tx)
+            .await
+            .unwrap_err();
+        server_a.abort();
+        server_b.abort();
+        assert!(err.contains("500") && err.contains("404"), "聚合错误应含各源原因: {err}");
+    }
+
+    /// 流式下载应发 downloading 阶段进度事件（按 Content-Length 计算百分比）。
+    #[tokio::test]
+    async fn 流式下载发送downloading进度事件() {
+        let body = "x".repeat(200);
+        let (url, server) = mock_api_with(200, body.clone()).await;
+        let (tx, mut rx) = tokio::sync::broadcast::channel(64);
+        let client = build_http_client(15).unwrap();
+        let sources = vec![format!("{url}/b.tgz")];
+        let (bytes, total) = download_from_sources(&client, &sources, &tx)
+            .await
+            .unwrap();
+        server.abort();
+        assert_eq!(bytes.len() as u64, total);
+        // 收集进度事件
+        let mut downloaded_stage = false;
+        let mut last_pct: f64 = -1.0;
+        while let Ok(ev) = rx.try_recv() {
+            if ev.event_type == "download-progress" {
+                let stage = ev.payload["stage"].as_str().unwrap_or("").to_string();
+                if stage == "downloading" {
+                    downloaded_stage = true;
+                    last_pct = ev.payload["percentage"].as_f64().unwrap_or(-1.0);
+                }
+            }
+        }
+        assert!(downloaded_stage, "应发出 downloading 阶段事件");
+        assert_eq!(last_pct, 100.0, "下载完成进度应为 100%");
+    }
+
+    /// 镜像 URL 生成：官方第一优先 + 镜像前缀。
+    #[test]
+    fn 镜像候选生成_官方优先() {
+        let candidates = mirror_urls("https://github.com/x/y.tgz");
+        assert_eq!(candidates[0], "https://github.com/x/y.tgz", "官方源应第一优先");
+        assert!(candidates.iter().any(|c| c.starts_with("https://ghproxy.com/")), "应含 ghproxy 镜像");
+        assert!(candidates.len() >= 3);
+    }
+
+    // ---- B9：异步下载（网关 504 实测修复） ----
+    // UPDATE_API_URL 是进程级环境变量：涉及它的测试必须串行（静态锁防并行竞争）
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 构造合法 bundle（manifest + daemon + dist/index.html，sha256 一致）。
+    fn make_bundle() -> (Vec<u8>, String) {
+        let dir = temp_dir("bundle-src");
+        let daemon = dir.join("chmlfrp-daemon");
+        let dist = dir.join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(&daemon, b"bin").unwrap();
+        std::fs::write(dist.join("index.html"), b"html").unwrap();
+        let manifest = serde_json::json!({
+            "version": "9.9.9",
+            "platform": platform_suffix(),
+            "files": {
+                "chmlfrp-daemon": sha256_hex(&daemon).unwrap(),
+                "dist/index.html": sha256_hex(&dist.join("index.html")).unwrap(),
+            }
+        });
+        std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
+        let tar_gz = dir.join("bundle.tgz");
+        let file = std::fs::File::create(&tar_gz).unwrap();
+        let gz = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut tar = tar::Builder::new(gz);
+        tar.append_path_with_name(&daemon, "chmlfrp-daemon").unwrap();
+        tar.append_path_with_name(&dist.join("index.html"), "dist/index.html").unwrap();
+        tar.append_path_with_name(&dir.join("manifest.json"), "manifest.json").unwrap();
+        let gz = tar.into_inner().unwrap();
+        gz.finish().unwrap();
+        let bytes = std::fs::read(&tar_gz).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        (bytes, platform_suffix().to_string())
+    }
+
+    /// 双路径 mock：/api.json → GitHub API 形态；/bundle.tgz → bundle 字节。
+    async fn mock_update_server(
+        listener: tokio::net::TcpListener,
+        api_body: String,
+        bundle: Vec<u8>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { break };
+                let mut buf = [0u8; 8192];
+                let _ = sock.read(&mut buf).await;
+                let req = String::from_utf8_lossy(&buf);
+                let (body, ct) = if req.contains("/bundle.tgz") {
+                    (bundle.clone(), "application/octet-stream")
+                } else {
+                    (api_body.as_bytes().to_vec(), "application/json")
+                };
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {ct}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = sock.write_all(head.as_bytes()).await;
+                let _ = sock.write_all(&body).await;
+            }
+        })
+    }
+
+    /// 异步下载：POST 立即返回，任务完成后经 download-result 事件推送成功。
+    #[tokio::test]
+    async fn 异步下载完成发download_result成功事件() {
+        let (bundle, platform) = make_bundle();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = format!("http://{}", listener.local_addr().unwrap());
+        let api_body = serde_json::json!({
+            "tag_name": "v9.9.9",
+            "assets": [{
+                "name": format!("chmlfrp-fnos-9.9.9-{platform}.tar.gz"),
+                "browser_download_url": format!("{addr}/bundle.tgz"),
+                "size": bundle.len(),
+            }]
+        }).to_string();
+        let server = mock_update_server(listener, api_body, bundle).await;
+
+        let dir = temp_dir("async-dl");
+        let _env_guard = ENV_LOCK.lock().unwrap();
+        let cfg = crate::config::DaemonConfig {
+            data_dir: dir.clone(),
+            web_dir: dir.join("web"),
+            app_dest: None,
+            listen_addr: "127.0.0.1:0".parse().unwrap(),
+        };
+        let (tx, mut rx) = tokio::sync::broadcast::channel(64);
+        std::env::set_var("UPDATE_API_URL", format!("{addr}/api.json"));
+        run_download_task(Arc::new(cfg), UpdateChecker::default(), tx).await;
+        std::env::remove_var("UPDATE_API_URL");
+        server.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let ev = collect_download_result(&mut rx).await.expect("应收到 download-result 事件");
+        assert_eq!(ev.event_type, "download-result");
+        assert_eq!(ev.payload["ok"], true, "下载成功应 ok:true");
+        assert!(ev.payload["staged"].as_str().unwrap_or("").contains("staged"));
+        assert!(ev.payload["error"].is_null(), "成功不应带 error");
+    }
+
+    /// 异步下载失败：download-result 事件带 error。
+    #[tokio::test]
+    async fn 异步下载失败发download_result错误事件() {
+        let (bundle, _platform) = make_bundle();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = format!("http://{}", listener.local_addr().unwrap());
+        // 检查通过但 bundle 下载地址不通 → 下载失败
+        let api_body = serde_json::json!({
+            "tag_name": "v9.9.9",
+            "assets": [{
+                "name": format!("chmlfrp-fnos-9.9.9-x86.tar.gz"),
+                "browser_download_url": format!("http://127.0.0.1:1/nope.tgz"),
+                "size": bundle.len(),
+            }]
+        }).to_string();
+        let server = mock_update_server(listener, api_body, bundle).await;
+
+        let dir = temp_dir("async-dl-err");
+        let _env_guard = ENV_LOCK.lock().unwrap();
+        let cfg = crate::config::DaemonConfig {
+            data_dir: dir.clone(),
+            web_dir: dir.join("web"),
+            app_dest: None,
+            listen_addr: "127.0.0.1:0".parse().unwrap(),
+        };
+        let (tx, mut rx) = tokio::sync::broadcast::channel(64);
+        std::env::set_var("UPDATE_API_URL", format!("{addr}/api.json"));
+        run_download_task(Arc::new(cfg), UpdateChecker::default(), tx).await;
+        std::env::remove_var("UPDATE_API_URL");
+        server.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let ev = collect_download_result(&mut rx).await.expect("应收到 download-result 事件");
+        assert_eq!(ev.event_type, "download-result");
+        assert_eq!(ev.payload["ok"], false, "下载失败应 ok:false");
+        assert!(
+            ev.payload["error"].as_str().unwrap_or("").contains("所有下载源均失败"),
+            "错误应含聚合信息: {}",
+            ev.payload["error"]
+        );
+    }
+
+    /// 在事件流中等待 download-result（前面会有 connecting/downloading 等进度事件）。
+    async fn collect_download_result(
+        rx: &mut tokio::sync::broadcast::Receiver<crate::events::Event>,
+    ) -> Option<crate::events::Event> {
+        use tokio::time::{timeout, Duration};
+        loop {
+            match timeout(Duration::from_secs(30), rx.recv()).await {
+                Ok(Ok(ev)) if ev.event_type == "download-result" => return Some(ev),
+                Ok(Ok(_)) => continue,
+                _ => return None,
+            }
+        }
     }
 }

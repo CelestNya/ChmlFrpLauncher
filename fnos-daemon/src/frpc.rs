@@ -83,6 +83,8 @@ pub struct FrpcManager {
     pub persistence: Persistence,
     pub events: broadcast::Sender<Event>,
     pub log_history: LogHistory,
+    /// 日志持久化文件（2026-08-17：daemon 重启后日志不丢；None = 未初始化）
+    pub logfile: Option<Arc<crate::logfile::LogFile>>,
     pub guard: Arc<GuardState>,
 }
 
@@ -91,6 +93,7 @@ impl FrpcManager {
         data_dir: PathBuf,
         events: broadcast::Sender<Event>,
         log_history: LogHistory,
+        logfile: Option<Arc<crate::logfile::LogFile>>,
         guard: Arc<GuardState>,
     ) -> Self {
         Self {
@@ -99,14 +102,15 @@ impl FrpcManager {
             persistence: Persistence::new(&data_dir),
             events,
             log_history,
+            logfile,
             guard,
         }
     }
 
-    /// 发布日志事件：写历史缓冲（WS 断线补发）+ 广播实时推送。
+    /// 发布日志事件：写历史缓冲（WS 断线补发）+ 持久化文件 + 广播实时推送。
     pub fn emit_log(&self, msg: LogMessage) {
         let event = Event::log(msg);
-        push_log_history(&self.log_history, &event);
+        push_log_history(&self.log_history, self.logfile.as_deref(), &event);
         let _ = self.events.send(event);
     }
 
@@ -178,6 +182,7 @@ impl FrpcManager {
             spawn_log_reader(
                 self.events.clone(),
                 self.log_history.clone(),
+                self.logfile.clone(),
                 tunnel_id,
                 user_token.clone(),
                 node_token.clone(),
@@ -189,6 +194,7 @@ impl FrpcManager {
             spawn_log_reader(
                 self.events.clone(),
                 self.log_history.clone(),
+                self.logfile.clone(),
                 tunnel_id,
                 user_token,
                 node_token,
@@ -416,9 +422,11 @@ impl FrpcManager {
 /// 断线窗口内 broadcast 无订阅者、send 返回 Err；若此时退出，日志线程将永久死亡，
 /// 重连后 frpc 输出也永远不会再推送。事件丢弃可接受，线程必须存活。
 /// （pub(crate)：custom.rs 复用，传空 secret 即不脱敏。）
+#[allow(clippy::too_many_arguments)] // 日志线程参数均为独立配置项，成簇收益低
 pub(crate) fn spawn_log_reader(
     events: broadcast::Sender<Event>,
     log_history: LogHistory,
+    logfile: Option<Arc<crate::logfile::LogFile>>,
     tunnel_id: i32,
     user_token: String,
     node_token: String,
@@ -454,7 +462,7 @@ pub(crate) fn spawn_log_reader(
                     message,
                     timestamp,
                 });
-                push_log_history(&log_history, &event);
+                push_log_history(&log_history, logfile.as_deref(), &event);
                 let _ = events.send(event);
             }
         })
@@ -704,6 +712,7 @@ mod tests {
             data_dir,
             tx,
             history,
+            None,
             GuardState::new(),
         ))
     }

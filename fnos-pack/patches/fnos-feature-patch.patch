@@ -162,108 +162,6 @@ index 1ae3c5b..d7640e9 100644
      );
      audio.volume = 0.3;
      audio.play().catch((err) => {
-diff --git a/src/services/api.ts b/src/services/api.ts
-index 9d15c2b..481539a 100644
---- a/src/services/api.ts
-+++ b/src/services/api.ts
-@@ -113,6 +113,7 @@ const DEVICE_CODE_DEFAULT_SCOPE = "profile email offline_access chmlfrp_api";
- 
- // 简单的请求去重（针对短时间内重复发起相同请求的场景）
- const pendingRequests = new Map<string, Promise<unknown>>();
-+const tokenRefreshPromises = new Map<string, Promise<AuthenticatedUser>>();
- 
- function normalizeHeaders(h?: HeadersInit): Record<string, string> {
-   if (!h) return {};
-@@ -234,13 +235,48 @@ async function refreshAccessToken(refreshToken: string): Promise<DeviceTokenResp
-   );
- }
- 
--async function ensureAuthenticatedUser(
--  explicitToken?: string,
--): Promise<{
-+interface AuthenticatedUser {
-   storedUser: StoredUser | null;
-   accessToken?: string;
-   legacyToken?: string;
--}> {
-+}
-+
-+async function refreshAuthenticatedUser(
-+  storedUser: StoredUser,
-+): Promise<AuthenticatedUser> {
-+  const refreshToken = storedUser.refreshToken!;
-+  const refreshed = await refreshAccessToken(refreshToken);
-+  if (!refreshed.access_token) {
-+    if (getStoredUser()?.refreshToken === refreshToken) {
-+      clearStoredUser();
-+    }
-+    throw new Error(
-+      getOAuthErrorMessage(refreshed, "登录信息已过期，请重新登录"),
-+    );
-+  }
-+
-+  const updatedUser: StoredUser = {
-+    ...storedUser,
-+    accessToken: refreshed.access_token,
-+    refreshToken: refreshed.refresh_token || storedUser.refreshToken,
-+    accessTokenExpiresAt: refreshed.expires_in
-+      ? Date.now() + refreshed.expires_in * 1000
-+      : storedUser.accessTokenExpiresAt,
-+    tokenType: refreshed.token_type || storedUser.tokenType || "Bearer",
-+  };
-+  if (getStoredUser()?.refreshToken === refreshToken) {
-+    saveStoredUser(updatedUser);
-+  }
-+  return {
-+    storedUser: updatedUser,
-+    accessToken: updatedUser.accessToken,
-+    legacyToken: getLegacyApiToken(updatedUser),
-+  };
-+}
-+
-+async function ensureAuthenticatedUser(
-+  explicitToken?: string,
-+): Promise<AuthenticatedUser> {
-   if (explicitToken?.trim()) {
-     return {
-       storedUser: getStoredUser(),
-@@ -256,28 +292,15 @@ async function ensureAuthenticatedUser(
-   const currentAccessToken = getCurrentAccessToken(storedUser);
-   if (currentAccessToken) {
-     if (storedUser.refreshToken && isAccessTokenExpiring(storedUser)) {
--      const refreshed = await refreshAccessToken(storedUser.refreshToken);
--      if (!refreshed.access_token) {
--        clearStoredUser();
--        throw new Error(
--          getOAuthErrorMessage(refreshed, "登录信息已过期，请重新登录"),
--        );
-+      const refreshToken = storedUser.refreshToken;
-+      let refreshPromise = tokenRefreshPromises.get(refreshToken);
-+      if (!refreshPromise) {
-+        refreshPromise = refreshAuthenticatedUser(storedUser).finally(() => {
-+          tokenRefreshPromises.delete(refreshToken);
-+        });
-+        tokenRefreshPromises.set(refreshToken, refreshPromise);
-       }
--      const updatedUser: StoredUser = {
--        ...storedUser,
--        accessToken: refreshed.access_token,
--        refreshToken: refreshed.refresh_token || storedUser.refreshToken,
--        accessTokenExpiresAt: refreshed.expires_in
--          ? Date.now() + refreshed.expires_in * 1000
--          : storedUser.accessTokenExpiresAt,
--        tokenType: refreshed.token_type || storedUser.tokenType || "Bearer",
--      };
--      saveStoredUser(updatedUser);
--      return {
--        storedUser: updatedUser,
--        accessToken: updatedUser.accessToken,
--        legacyToken: getLegacyApiToken(updatedUser),
--      };
-+      return refreshPromise;
-     }
- 
-     return {
 diff --git a/src/services/frpcManager.ts b/src/services/frpcManager.ts
 index dee6ea2..6efc03b 100644
 --- a/src/services/frpcManager.ts
@@ -432,3 +330,70 @@ index a760582..44b87f8 100644
    private notifyListeners() {
      const logsCopy = [...this.logs];
      this.listeners.forEach((listener) => {
+diff --git a/src/services/updateService.ts b/src/services/updateService.ts
+index 5de5c20..ba7a3c7 100644
+--- a/src/services/updateService.ts
++++ b/src/services/updateService.ts
+@@ -43,9 +43,11 @@ export class UpdateService {
+ 
+   /**
+    * 安装更新
+-   * @param onProgress 下载进度回调函数
++   * @param onProgress 下载进度回调函数（fnOS 额外携带阶段 stage）
+    */
+-  async installUpdate(onProgress?: (progress: number) => void): Promise<void> {
++  async installUpdate(
++    onProgress?: (progress: number, stage?: string) => void,
++  ): Promise<void> {
+     try {
+       const update = await check({
+         headers: {},
+@@ -56,16 +58,42 @@ export class UpdateService {
+         let downloadedBytes = 0;
+ 
+         await update.downloadAndInstall((progressEvent: DownloadEvent) => {
++          // fnOS（shim 转发）：data 额外携带 daemon 的 stage / percentage；
++          // 桌面插件形态只有 contentLength / chunkLength，回退字节换算。
++          const data = (progressEvent as typeof progressEvent & {
++            data?: {
++              contentLength?: number;
++              chunkLength?: number;
++              stage?: string;
++              percentage?: number;
++            };
++          }).data;
++          const stage = data?.stage;
+           if (progressEvent.event === "Started") {
+-            contentLength = progressEvent.data.contentLength || 0;
+-          } else if (progressEvent.event === "Progress" && onProgress) {
+-            downloadedBytes += progressEvent.data.chunkLength;
+-            if (contentLength > 0) {
+-              const percentage = (downloadedBytes / contentLength) * 100;
++            contentLength = data?.contentLength || 0;
++            if (onProgress) {
+               flushSync(() => {
+-                onProgress(Math.min(percentage, 100));
++                onProgress(0, stage || "connecting");
+               });
+             }
++          } else if (progressEvent.event === "Progress" && onProgress) {
++            downloadedBytes += data?.chunkLength || 0;
++            let percentage: number;
++            if (stage === "verifying" || stage === "applying") {
++              percentage = 100; // 校验/应用发生在下载完成后
++            } else if (typeof data?.percentage === "number") {
++              percentage = data.percentage; // fnOS：daemon 权威百分比
++            } else if (contentLength > 0) {
++              percentage = (downloadedBytes / contentLength) * 100;
++            } else {
++              percentage = 0;
++            }
++            flushSync(() => {
++              onProgress(
++                Math.min(Math.max(percentage, 0), 100),
++                stage || "downloading",
++              );
++            });
+           }
+         });
+       } else {
