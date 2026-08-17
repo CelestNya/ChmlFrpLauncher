@@ -10,7 +10,7 @@ index 3e48667..42ee328 100644
  
  function App() {
    const [activeTab, setActiveTab] = useState("home");
-@@ -54,11 +55,9 @@ function App() {
+@@ -54,10 +55,14 @@ function App() {
    const { updateInfo, setUpdateInfo } = useUpdateCheck();
    const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
  
