@@ -1,5 +1,5 @@
 diff --git a/src/App.tsx b/src/App.tsx
-index 3e48667..76d752f 100644
+index 3e48667..42ee328 100644
 --- a/src/App.tsx
 +++ b/src/App.tsx
 @@ -25,6 +25,7 @@ import { BackgroundLayer } from "@/components/App/components/BackgroundLayer";
@@ -10,7 +10,7 @@ index 3e48667..76d752f 100644
  
  function App() {
    const [activeTab, setActiveTab] = useState("home");
-@@ -54,11 +55,13 @@ function App() {
+@@ -54,11 +55,11 @@ function App() {
    const { updateInfo, setUpdateInfo } = useUpdateCheck();
    const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
  
@@ -22,14 +22,42 @@ index 3e48667..76d752f 100644
 +  // 常量计算（fnOS：uiConfig 裁剪标题栏相关 UI，平台分支随配置关闭）
 +  const shouldShowTitleBar = uiConfig.titleBar ? (isMacOS ? showTitleBar : isWindows ? showTitleBar : true) : false;
 +  const isTitleBarHidden = uiConfig.titleBar && (isMacOS || isWindows) && !showTitleBar;
-+  // fnOS（uiConfig 裁剪标题栏）：iframe 无系统标题栏，内容区仍保留 padding，
-+  // 否则创建隧道等按钮紧贴窗口上沿（美观度优化，2026-08-15）
-+  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : true;
++  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : false;
 +  const SIDEBAR_LEFT = uiConfig.titleBar && isMacOS && !showTitleBar ? 10 : 15;
    const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
  
    // 主题与更新监听
-@@ -146,8 +149,8 @@ function App() {
+@@ -100,17 +101,26 @@ function App() {
+ 
+   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
+   const [downloadProgress, setDownloadProgress] = useState(0);
++  const [updateStage, setUpdateStage] = useState<string>("");
++  const [updateError, setUpdateError] = useState<string>("");
+ 
+   const handleUpdate = useCallback(async () => {
+     if (!updateInfo) return;
+     setIsDownloadingUpdate(true);
+     setDownloadProgress(0);
++    setUpdateStage("");
++    setUpdateError("");
+     try {
+-      await updateService.installUpdate((p) => setDownloadProgress(p));
+-      toast.success("更新已下载完成，重启后生效");
++      await updateService.installUpdate((p, stage) => {
++        setDownloadProgress(p);
++        if (stage) setUpdateStage(stage);
++      });
++      toast.success("更新已下载完成，正在自动刷新…");
+       setUpdateInfo(null);
+     } catch (e) {
+-      toast.error(`更新失败: ${String(e)}`);
++      const errorMsg = e instanceof Error ? e.message : String(e);
++      setUpdateError(errorMsg);
++      toast.error(`更新失败: ${errorMsg}`);
+     } finally {
+       setIsDownloadingUpdate(false);
+     }
+@@ -146,8 +156,8 @@ function App() {
                onVideoLoadedData={handleVideoLoadedData}
            />
  
@@ -40,7 +68,7 @@ index 3e48667..76d752f 100644
                <div data-tauri-drag-region className="absolute top-0 right-0 left-0 z-50 h-9 flex items-center justify-end pr-2">
                  <WindowControls />
                </div>
-@@ -200,7 +203,7 @@ function App() {
+@@ -200,7 +210,7 @@ function App() {
                      userInfo={userInfo}
                  />
                  <div className="flex-1 flex flex-col overflow-hidden relative">
@@ -49,7 +77,7 @@ index 3e48667..76d752f 100644
                    <div className={`flex-1 overflow-auto px-6 pb-6 md:px-8 md:pb-8 ${shouldPadTop ? "pt-4 md:pt-6" : "pt-0"}`}>
                      <div className="max-w-6xl mx-auto w-full h-full flex flex-col">{content}</div>
                    </div>
-@@ -209,7 +212,7 @@ function App() {
+@@ -209,7 +219,7 @@ function App() {
            )}
          </div>
  
@@ -58,8 +86,16 @@ index 3e48667..76d752f 100644
          <CloseConfirmDialog
              isOpen={showCloseConfirmDialog}
              onClose={() => setShowCloseConfirmDialog(false)}
+@@ -221,6 +231,7 @@ function App() {
+                 isOpen={!!updateInfo} onClose={() => !isDownloadingUpdate && setUpdateInfo(null)}
+                 onUpdate={handleUpdate} version={updateInfo.version} date={updateInfo.date} body={updateInfo.body}
+                 isDownloading={isDownloadingUpdate} downloadProgress={downloadProgress}
++                stage={updateStage} error={updateError}
+             />
+         )}
+       </>
 diff --git a/src/components/pages/Settings/components/AppearanceSection.tsx b/src/components/pages/Settings/components/AppearanceSection.tsx
-index 69b973d..e07f753 100644
+index 69b973d..69800bd 100644
 --- a/src/components/pages/Settings/components/AppearanceSection.tsx
 +++ b/src/components/pages/Settings/components/AppearanceSection.tsx
 @@ -14,6 +14,7 @@ import type { ThemeMode, SidebarMode } from "../types";
@@ -95,16 +131,6 @@ index 69b973d..e07f753 100644
                      </>
                  ) : (
                      <Button
-@@ -307,7 +310,8 @@ export function AppearanceSection({isMacOS,
-             </ItemActions>
-           </Item>
- 
--          {backgroundImage && !isVideo && (
-+          {/* fnOS：幻灯片间隔随「选择文件夹」一起裁剪（无文件夹轮播，间隔无意义） */}
-+          {uiConfig.backgroundFolderImport && backgroundImage && !isVideo && (
-               <>
-                 <ItemSeparator />
-                 <Item variant="outline" className="border-0">
 diff --git a/src/components/pages/Settings/components/SystemSection.tsx b/src/components/pages/Settings/components/SystemSection.tsx
 index ca14adb..5cf28e8 100644
 --- a/src/components/pages/Settings/components/SystemSection.tsx
