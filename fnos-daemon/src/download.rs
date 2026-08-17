@@ -318,6 +318,7 @@ pub async fn download_frpc(frpc: &Arc<FrpcManager>) -> Result<String, String> {
                             downloaded,
                             total: total_size,
                             percentage,
+                            stage: "downloading".to_string(),
                         }));
                         this_chunk_size = 0;
                     }
@@ -356,6 +357,7 @@ pub async fn download_frpc(frpc: &Arc<FrpcManager>) -> Result<String, String> {
         downloaded,
         total: total_size,
         percentage: 100.0,
+        stage: "downloading".to_string(),
     }));
 
     if total_size > 0 && downloaded < total_size {

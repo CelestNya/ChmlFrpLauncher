@@ -341,6 +341,7 @@ impl CustomManager {
             frpc::spawn_log_reader(
                 self.frpc.events.clone(),
                 self.frpc.log_history.clone(),
+                self.frpc.logfile.clone(),
                 tunnel_id_hash,
                 String::new(),
                 String::new(),
@@ -352,6 +353,7 @@ impl CustomManager {
             frpc::spawn_log_reader(
                 self.frpc.events.clone(),
                 self.frpc.log_history.clone(),
+                self.frpc.logfile.clone(),
                 tunnel_id_hash,
                 String::new(),
                 String::new(),
@@ -677,6 +679,7 @@ mod tests {
             std::env::temp_dir().join("fnos-custom-id-test"),
             tokio::sync::broadcast::channel(1).0,
             Arc::new(Mutex::new(std::collections::VecDeque::new())),
+            None,
             GuardState::new(),
         )));
         let err = manager

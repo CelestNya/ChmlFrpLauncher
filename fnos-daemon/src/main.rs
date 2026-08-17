@@ -13,6 +13,7 @@ mod events;
 mod frpc;
 mod guard;
 mod invoke;
+mod logfile;
 mod net;
 mod persist;
 mod proxy;
@@ -291,10 +292,25 @@ async fn main() {
     let guard = GuardState::new(); // D1：守护默认开启
     // frpc 日志环形缓冲（WS 断线重连补发，容量见 events::LOG_HISTORY_CAP）
     let log_history: LogHistory = Arc::new(Mutex::new(VecDeque::new()));
+    // 日志持久化文件（2026-08-17：daemon 更新重启后日志不丢）——启动时从文件回灌
+    // 尾部日志进内存缓冲（重启前历史在 WS 重连后仍可见）
+    // 日志文件失败不阻断 daemon（降级为仅内存缓冲）
+    let logfile = logfile::LogFile::new(&cfg.data_dir).ok().map(Arc::new);
+    if logfile.is_none() {
+        warn!("日志持久化不可用（继续运行，重启后历史日志不保留）");
+    }
+    if let Some(lf) = &logfile {
+        if let Ok(mut h) = log_history.lock() {
+            for line in lf.read_tail(events::LOG_HISTORY_CAP) {
+                h.push_back(line);
+            }
+        }
+    }
     let frpc = Arc::new(FrpcManager::new(
         cfg.data_dir.clone(),
         event_tx.clone(),
         log_history.clone(),
+        logfile,
         guard.clone(),
     ));
     let custom = Arc::new(CustomManager::new(frpc.clone()));
@@ -565,6 +581,7 @@ mod tests {
                 dir.clone(),
                 tokio::sync::broadcast::channel(8).0,
                 Arc::new(std::sync::Mutex::new(VecDeque::new())),
+                None,
                 GuardState::new(),
             )),
             custom: Arc::new(CustomManager::new(Arc::new(
@@ -572,6 +589,7 @@ mod tests {
                     dir.clone(),
                     tokio::sync::broadcast::channel(8).0,
                     Arc::new(std::sync::Mutex::new(VecDeque::new())),
+                    None,
                     GuardState::new(),
                 ),
             ))),
