@@ -31,6 +31,9 @@
   const pendingFrames: Array<{ type: string; payload: unknown }> = [];
   // ---- updater 下载进度 Channel id（B6：download-progress 帧转发目标） ----
   let updateChannelId: number | null = null;
+  // ---- B8：下载阶段转发状态（Started 事件 + chunkLength 增量，见 ws.onmessage） ----
+  let progressStarted = false;
+  let progressLastDownloaded = 0;
   let nextId = 1;
 
   function transformCallback(callback: Callback, once = false): number {
@@ -93,6 +96,37 @@
 
     let ws: WebSocket | null = null;
     let retry = 0;
+    // ---- B8：更新完成后 daemon 重启，WS 重连成功比对版本，变化则自动刷新 ----
+    let knownVersion: string | null = null;
+
+    const checkVersionOnOpen = () => {
+      void fetch(`${gatewayPrefix()}/api/bootstrap`)
+        .then((r) => r.json())
+        .then((d: { version?: string }) => {
+          const v = d.version || "";
+          if (!v) return;
+          if (knownVersion === null) {
+            // 首次连接：记录基线（页面加载时 daemon 正常态）
+            knownVersion = v;
+            return;
+          }
+          if (v !== knownVersion) {
+            // 更新已应用：提示后自动刷新（旧前端代码连的是旧 daemon 语义）
+            const overlay = document.createElement("div");
+            overlay.id = "fnos-update-reload-overlay";
+            overlay.style.cssText =
+              "position:fixed;inset:0;z-index:99999;background:rgba(10,10,14,.78);" +
+              "color:#fff;display:flex;align-items:center;justify-content:center;" +
+              "font:15px/1.6 system-ui,sans-serif;letter-spacing:.5px;";
+            overlay.textContent = "更新完成，正在刷新…";
+            document.body.appendChild(overlay);
+            setTimeout(() => location.reload(), 400);
+          }
+        })
+        .catch(() => {
+          // daemon 重启窗口内 fetch 失败：忽略，等下一轮重连再比对
+        });
+    };
 
     const open = () => {
       if (ws) ws.close();
@@ -104,6 +138,7 @@
 
       ws.onopen = () => {
         retry = 0;
+        checkVersionOnOpen();
       };
 
       ws.onmessage = (ev) => {
@@ -114,9 +149,42 @@
           return;
         }
         if (!frame.type) return;
-        // updater 下载进度：转发给 download_and_install 时登记的 Channel
+        // updater 下载进度：转发给 download_and_install 时登记的 Channel。
+        // B8：daemon 载荷（{downloaded,total,percentage,stage}）→ 桌面插件形态——
+        // 首次帧先发 Started（补 contentLength，前端据此才算得出百分比），
+        // 后续 Progress 携带 chunkLength=本帧增量（前端 downloadedBytes += chunkLength）。
+        // 此前直接透传 daemon 载荷：前端读 chunkLength 得 undefined → NaN → 进度恒 0。
         if (frame.type === "download-progress" && updateChannelId !== null) {
-          runCallback(updateChannelId, { event: "Progress", data: frame.payload });
+          const p = (frame.payload ?? {}) as {
+            downloaded?: number;
+            total?: number;
+            percentage?: number;
+            stage?: string;
+          };
+          const downloaded = p.downloaded ?? 0;
+          const total = p.total ?? 0;
+          if (!progressStarted) {
+            progressStarted = true;
+            progressLastDownloaded = 0;
+            runCallback(updateChannelId, {
+              event: "Started",
+              data: {
+                contentLength: total,
+                stage: p.stage ?? "connecting",
+              },
+            });
+          }
+          const chunkLength = Math.max(downloaded - progressLastDownloaded, 0);
+          progressLastDownloaded = downloaded;
+          runCallback(updateChannelId, {
+            event: "Progress",
+            data: {
+              chunkLength,
+              contentLength: total,
+              percentage: p.percentage ?? 0,
+              stage: p.stage ?? "downloading",
+            },
+          });
         }
         const ids = eventListeners.get(frame.type);
         if (!ids) {
@@ -344,6 +412,9 @@
       // B6：登记进度 Channel id——daemon 下载时广播 download-progress 帧，
       // onmessage 转发给该 Channel（进度条不再恒 0）
       updateChannelId = (args.onEvent as number | null) ?? null;
+      // B8：每次下载从零开始累计增量（多条帧间增量，防进度回跳）
+      progressStarted = false;
+      progressLastDownloaded = 0;
       return fetch(`${gatewayPrefix()}/api/update/download`, { method: "POST" })
         .then((r) => r.json())
         .then((resp: { ok?: boolean; error?: string }) => {

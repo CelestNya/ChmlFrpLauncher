@@ -56,10 +56,13 @@
       "src/components/pages/Logs.tsx",
       "src/services/logStore.ts",
       "src/services/frpcManager.ts",
-      "src/lib/sound.ts"
+      "src/lib/sound.ts",
+      "src/services/api.ts"
     ],
-    "total": 12
+    "total": 13
   },
+
+  "uiCropPatch": "adapters/v0.7.5/ui-crop.patch",
 
   "uiConfig": {
     "schemaVersion": 1,

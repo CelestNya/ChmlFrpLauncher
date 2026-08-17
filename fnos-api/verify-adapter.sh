@@ -14,13 +14,37 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ADAPTER_MANIFEST="${1:-$REPO_ROOT/fnos-api/adapters/v0.7.5/manifest.json}"
 
+# 裁剪补丁（ui-crop.patch）由 adapter 分支持有（2026-08-16 决策：裁剪归 adapter，
+# patch 零裁剪代码）。路径从 manifest 的 uiCropPatch 声明读；组合构建态下在工作区可读。
+# Windows 下 python 不认 Git Bash 的 /d/ 路径 → cygpath 转成 D:\（与 PY_MANIFEST 同款）。
+PY_CROP_MANIFEST="$ADAPTER_MANIFEST"
+if command -v cygpath >/dev/null 2>&1; then
+    PY_CROP_MANIFEST=$(cygpath -w "$ADAPTER_MANIFEST")
+fi
+CROP_PATCH=$(python -c "import json,sys; m=json.load(open(r'$PY_CROP_MANIFEST')); print(m.get('uiCropPatch',''))" | tr -d '\r')
+if [ -n "$CROP_PATCH" ]; then
+    CROP_PATCH="$REPO_ROOT/fnos-api/$CROP_PATCH"
+fi
+
 echo "[verify-adapter] 校验 adapter: $ADAPTER_MANIFEST"
 
-# 1. 扫描 src/ 实际调用的命令（排除 plugin: 前缀，仅业务命令）
+# 1. 扫描调用命令（排除 plugin: 前缀，仅业务命令）
 #    形态：invoke<string>("cmd", args) 或 invoke("cmd", args)
+#    扫描对象 = src/（patcher 开发态：含 fnOS 改动）+ fnos-pack/patches/（组合构建态：src 干净，
+#    fnOS 改动在 patch 文件里，只统计新增行）
 USED_COMMANDS=$(find "$REPO_ROOT/src" \( -name "*.ts" -o -name "*.tsx" \) \
-    -exec grep -hoP 'invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' {} + 2>/dev/null | sort -u)
-echo "=== 前端实际 invoke 的命令（$(echo "$USED_COMMANDS" | wc -l) 个）==="
+    -exec grep -hoP 'invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' {} + 2>/dev/null || true)
+if [ -d "$REPO_ROOT/fnos-pack/patches" ]; then
+    USED_COMMANDS="$USED_COMMANDS
+$(find "$REPO_ROOT/fnos-pack/patches" -name "*.patch" \
+    -exec grep -hoP '^\+.*invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' {} + 2>/dev/null || true)"
+fi
+if [ -n "$CROP_PATCH" ] && [ -f "$CROP_PATCH" ]; then
+    USED_COMMANDS="$USED_COMMANDS
+$(grep -hoP '^\+.*invoke(?:<[^>]*>)?\(\s*["'"'"']\K[a-z_]+' "$CROP_PATCH" 2>/dev/null || true)"
+fi
+USED_COMMANDS=$(echo "$USED_COMMANDS" | sort -u)
+echo "=== 实际 invoke 的命令（$(echo "$USED_COMMANDS" | wc -l) 个）==="
 echo "$USED_COMMANDS"
 
 # 2. adapter 能力面（implemented + noop）
@@ -58,10 +82,20 @@ if [ -z "$MANIFEST_KEYS" ]; then
     echo "❌ adapter manifest 缺少 uiConfig.values" >&2
     exit 1
 fi
-# 扫描 patch 代码引用的 uiConfig.xxx（排除生成文件本身）
+# 扫描 uiConfig.xxx 引用（src 开发态 + patches 组合态，排除生成文件本身）
 USED_KEYS=$(find "$REPO_ROOT/src" \( -name "*.ts" -o -name "*.tsx" \) \
     ! -name "fnos-ui-config.ts" \
-    -exec grep -hoP 'uiConfig\.\K[a-zA-Z0-9_]+' {} + 2>/dev/null | sort -u)
+    -exec grep -hoP 'uiConfig\.\K[a-zA-Z0-9_]+' {} + 2>/dev/null || true)
+if [ -d "$REPO_ROOT/fnos-pack/patches" ]; then
+    USED_KEYS="$USED_KEYS
+$(find "$REPO_ROOT/fnos-pack/patches" -name "*.patch" \
+    -exec grep -hoP '^\+.*uiConfig\.\K[a-zA-Z0-9_]+' {} + 2>/dev/null || true)"
+fi
+if [ -n "$CROP_PATCH" ] && [ -f "$CROP_PATCH" ]; then
+    USED_KEYS="$USED_KEYS
+$(grep -hoP '^\+.*uiConfig\.\K[a-zA-Z0-9_]+' "$CROP_PATCH" 2>/dev/null || true)"
+fi
+USED_KEYS=$(echo "$USED_KEYS" | sort -u)
 MISSING_KEY=0
 for key in $USED_KEYS; do
     if ! echo "$MANIFEST_KEYS" | grep -qx "$key"; then
@@ -83,16 +117,21 @@ else
     exit 1
 fi
 
-# 5. 一致性：patcher 手写版 src/fnos-ui-config.ts 必须与 manifest 生成版一致（manifest 唯一权威）
-TMP_GEN="$(mktemp)"
-trap 'rm -f "$TMP_GEN"' EXIT
-node "$REPO_ROOT/fnos-api/generate-ui-config.mjs" --out "$TMP_GEN" >/dev/null
-if ! diff -q "$TMP_GEN" "$REPO_ROOT/src/fnos-ui-config.ts" >/dev/null; then
-    echo "❌ src/fnos-ui-config.ts 与 manifest 生成版不一致（manifest 是唯一权威，请用 generate-ui-config.mjs 重新生成）" >&2
-    diff "$TMP_GEN" "$REPO_ROOT/src/fnos-ui-config.ts" | head -20 >&2
-    exit 1
+# 5. 一致性：patcher 手写版 src/fnos-ui-config.ts 必须与 manifest 生成版一致（manifest 唯一权威）。
+#    组合构建态下 src/ 无该文件（构建时由 generate-ui-config 生成）→ 跳过
+if [ -f "$REPO_ROOT/src/fnos-ui-config.ts" ]; then
+    TMP_GEN="$(mktemp)"
+    trap 'rm -f "$TMP_GEN"' EXIT
+    node "$REPO_ROOT/fnos-api/generate-ui-config.mjs" --out "$TMP_GEN" >/dev/null
+    if ! diff -q "$TMP_GEN" "$REPO_ROOT/src/fnos-ui-config.ts" >/dev/null; then
+        echo "❌ src/fnos-ui-config.ts 与 manifest 生成版不一致（manifest 是唯一权威，请用 generate-ui-config.mjs 重新生成）" >&2
+        diff "$TMP_GEN" "$REPO_ROOT/src/fnos-ui-config.ts" | head -20 >&2
+        exit 1
+    fi
+    echo "✅ src/fnos-ui-config.ts 与 manifest 生成版一致"
+else
+    echo "⚠️ src/fnos-ui-config.ts 不存在（组合构建态，构建时由 manifest 生成）"
 fi
-echo "✅ src/fnos-ui-config.ts 与 manifest 生成版一致"
 
 # 6. patch 依赖校验：每个 patch 的 requires.api 必须 ≤ adapter 的 apiVersion（semver 粗筛）
 PATCH_MANIFEST="$REPO_ROOT/fnos-pack/patches/manifest.json"
@@ -104,14 +143,22 @@ if [ -f "$PATCH_MANIFEST" ]; then
         PY_PATCH_MANIFEST=$(cygpath -w "$PATCH_MANIFEST")
     fi
     python - "$PY_MANIFEST" "$PY_PATCH_MANIFEST" <<'PYEOF'
-import json, sys
+import json, sys, re
 
 def ver(v):
     return tuple(int(x) for x in v.strip().split("."))
 
 adapter = json.load(open(sys.argv[1]))
 api_version = ver(adapter["apiVersion"])
-patches = json.load(open(sys.argv[2]))["patches"]
+patch_manifest = json.load(open(sys.argv[2]))
+patches = patch_manifest["patches"]
+
+# patchSetVersion 格式校验：架构.功能.修复（三段数字，2026-08-16 用户决策）
+psv = patch_manifest.get("patchSetVersion")
+if not psv or not re.fullmatch(r"\d+\.\d+\.\d+", psv):
+    print(f"❌ patchSetVersion '{psv}' 非法（须为 架构.功能.修复 三段数字，如 1.5.2）", file=sys.stderr)
+    sys.exit(1)
+print(f"✅ patchSetVersion {psv}（架构.功能.修复）")
 
 ok = True
 for p in patches:

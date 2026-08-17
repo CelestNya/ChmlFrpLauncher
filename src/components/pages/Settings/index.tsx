@@ -74,6 +74,8 @@ export function Settings() {
 
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [updateStage, setUpdateStage] = useState<string>("");
+  const [updateError, setUpdateError] = useState<string>("");
 
   const { isDownloading, handleRedownloadFrpc } = useFrpcDownload();
 
@@ -175,18 +177,22 @@ export function Settings() {
 
     setIsDownloadingUpdate(true);
     setDownloadProgress(0);
+    setUpdateStage("");
+    setUpdateError("");
 
     try {
-      await updateService.installUpdate((progress) => {
+      await updateService.installUpdate((progress, stage) => {
         setDownloadProgress(progress);
+        if (stage) setUpdateStage(stage);
       });
-      toast.success("更新已下载完成，应用将在重启后更新", {
+      toast.success("更新已下载完成，正在自动刷新…", {
         duration: 5000,
       });
       setUpdateInfo(null);
       setIsDownloadingUpdate(false);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
+      setUpdateError(errorMsg);
       toast.error(`下载更新失败: ${errorMsg}`, {
         duration: 5000,
       });
@@ -283,6 +289,8 @@ export function Settings() {
           body={updateInfo.body}
           isDownloading={isDownloadingUpdate}
           downloadProgress={downloadProgress}
+          stage={updateStage}
+          error={updateError}
         />
       )}
     </div>

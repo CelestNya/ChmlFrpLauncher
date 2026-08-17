@@ -43,9 +43,11 @@ export class UpdateService {
 
   /**
    * 安装更新
-   * @param onProgress 下载进度回调函数
+   * @param onProgress 下载进度回调函数（fnOS 额外携带阶段 stage）
    */
-  async installUpdate(onProgress?: (progress: number) => void): Promise<void> {
+  async installUpdate(
+    onProgress?: (progress: number, stage?: string) => void,
+  ): Promise<void> {
     try {
       const update = await check({
         headers: {},
@@ -56,16 +58,42 @@ export class UpdateService {
         let downloadedBytes = 0;
 
         await update.downloadAndInstall((progressEvent: DownloadEvent) => {
+          // fnOS（shim 转发）：data 额外携带 daemon 的 stage / percentage；
+          // 桌面插件形态只有 contentLength / chunkLength，回退字节换算。
+          const data = (progressEvent as typeof progressEvent & {
+            data?: {
+              contentLength?: number;
+              chunkLength?: number;
+              stage?: string;
+              percentage?: number;
+            };
+          }).data;
+          const stage = data?.stage;
           if (progressEvent.event === "Started") {
-            contentLength = progressEvent.data.contentLength || 0;
-          } else if (progressEvent.event === "Progress" && onProgress) {
-            downloadedBytes += progressEvent.data.chunkLength;
-            if (contentLength > 0) {
-              const percentage = (downloadedBytes / contentLength) * 100;
+            contentLength = data?.contentLength || 0;
+            if (onProgress) {
               flushSync(() => {
-                onProgress(Math.min(percentage, 100));
+                onProgress(0, stage || "connecting");
               });
             }
+          } else if (progressEvent.event === "Progress" && onProgress) {
+            downloadedBytes += data?.chunkLength || 0;
+            let percentage: number;
+            if (stage === "verifying" || stage === "applying") {
+              percentage = 100; // 校验/应用发生在下载完成后
+            } else if (typeof data?.percentage === "number") {
+              percentage = data.percentage; // fnOS：daemon 权威百分比
+            } else if (contentLength > 0) {
+              percentage = (downloadedBytes / contentLength) * 100;
+            } else {
+              percentage = 0;
+            }
+            flushSync(() => {
+              onProgress(
+                Math.min(Math.max(percentage, 0), 100),
+                stage || "downloading",
+              );
+            });
           }
         });
       } else {

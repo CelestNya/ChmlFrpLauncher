@@ -101,17 +101,26 @@ function App() {
 
   const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [updateStage, setUpdateStage] = useState<string>("");
+  const [updateError, setUpdateError] = useState<string>("");
 
   const handleUpdate = useCallback(async () => {
     if (!updateInfo) return;
     setIsDownloadingUpdate(true);
     setDownloadProgress(0);
+    setUpdateStage("");
+    setUpdateError("");
     try {
-      await updateService.installUpdate((p) => setDownloadProgress(p));
-      toast.success("更新已下载完成，重启后生效");
+      await updateService.installUpdate((p, stage) => {
+        setDownloadProgress(p);
+        if (stage) setUpdateStage(stage);
+      });
+      toast.success("更新已下载完成，正在自动刷新…");
       setUpdateInfo(null);
     } catch (e) {
-      toast.error(`更新失败: ${String(e)}`);
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      setUpdateError(errorMsg);
+      toast.error(`更新失败: ${errorMsg}`);
     } finally {
       setIsDownloadingUpdate(false);
     }
@@ -222,6 +231,7 @@ function App() {
                 isOpen={!!updateInfo} onClose={() => !isDownloadingUpdate && setUpdateInfo(null)}
                 onUpdate={handleUpdate} version={updateInfo.version} date={updateInfo.date} body={updateInfo.body}
                 isDownloading={isDownloadingUpdate} downloadProgress={downloadProgress}
+                stage={updateStage} error={updateError}
             />
         )}
       </>
