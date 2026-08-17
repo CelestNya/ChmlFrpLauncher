@@ -804,6 +804,8 @@ mod tests {
     }
 
     // ---- B9：异步下载（网关 504 实测修复） ----
+    // UPDATE_API_URL 是进程级环境变量：涉及它的测试必须串行（静态锁防并行竞争）
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// 构造合法 bundle（manifest + daemon + dist/index.html，sha256 一致）。
     fn make_bundle() -> (Vec<u8>, String) {
@@ -880,6 +882,7 @@ mod tests {
         let server = mock_update_server(listener, api_body, bundle).await;
 
         let dir = temp_dir("async-dl");
+        let _env_guard = ENV_LOCK.lock().unwrap();
         let cfg = crate::config::DaemonConfig {
             data_dir: dir.clone(),
             web_dir: dir.join("web"),
@@ -918,6 +921,7 @@ mod tests {
         let server = mock_update_server(listener, api_body, bundle).await;
 
         let dir = temp_dir("async-dl-err");
+        let _env_guard = ENV_LOCK.lock().unwrap();
         let cfg = crate::config::DaemonConfig {
             data_dir: dir.clone(),
             web_dir: dir.join("web"),
