@@ -45,7 +45,9 @@
     "uiCrop": [
       "src/App.tsx",
       "src/components/pages/Settings/components/AppearanceSection.tsx",
-      "src/components/pages/Settings/components/SystemSection.tsx"
+      "src/components/pages/Settings/components/SystemSection.tsx",
+      "src/components/dialogs/UpdateDialog.tsx",
+      "src/components/pages/Settings/index.tsx"
     ],
     "featureBranch": [
       "src/components/pages/Settings/hooks/useBackgroundImage.ts",
@@ -58,9 +60,7 @@
       "src/services/frpcManager.ts",
       "src/lib/sound.ts",
       "src/services/api.ts",
-      "src/services/updateService.ts",
-      "src/components/dialogs/UpdateDialog.tsx",
-      "src/components/pages/Settings/index.tsx"
+      "src/services/updateService.ts"
     ],
     "total": 16
   },
