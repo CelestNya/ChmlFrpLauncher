@@ -161,7 +161,7 @@ dependencies = [
 
 [[package]]
 name = "chmlfrp-daemon"
-version = "0.7.5-1.5.3"
+version = "0.7.5-1.5.4"
 dependencies = [
  "axum",
  "base64",

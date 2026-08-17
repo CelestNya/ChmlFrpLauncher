@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "patchSetVersion": "1.5.3",
+  "patchSetVersion": "1.5.4",
   "description": "fnOS patch 集版本声明。patchSetVersion 按「架构.功能.修复」定义（2026-08-16 用户决策）：架构（major）= 破坏性架构变更（uiConfig 格式/契约面/shim 重构）；功能（minor）= 新功能/能力一代 +1；修复（patch）= bug 修复 +1。E4 联合版本号 = app 版本 + patchSetVersion（如 0.7.5-1.5.2）。每个 patch 的 featureVersion 为其自身演进；requires.api = 对 fnOS API 的硬依赖（构建期校验：requires.api ≤ adapter.apiVersion）。",
   "patches": [
     {
@@ -27,6 +27,11 @@
       "version": "1.5.3",
       "date": "2026-08-17",
       "note": "修复：幻灯片间隔随「选择文件夹」一同裁剪；收尾：UI 裁剪归 adapter（ui-crop.patch 构建期应用，patch 零裁剪代码，产物等价）。E4 联合号 0.7.5-1.5.3"
+    },
+    {
+      "version": "1.5.4",
+      "date": "2026-08-17",
+      "note": "修复：更新流程五条反馈——日志持久化文件（重启不丢）/分阶段下载进度（连接/下载/校验/应用）/多源镜像退避（官方+ghproxy）/进度恒 0（NaN）/更新完成自动刷新（shim 版本比对）；失败重试态 UI。E4 联合号 0.7.5-1.5.4"
     }
   ]
 }
