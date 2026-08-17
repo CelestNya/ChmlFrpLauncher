@@ -60,6 +60,15 @@ pub struct AutoRestartedPayload {
     pub timestamp: String,
 }
 
+/// 异步下载结果（2026-08-18：网关转发超时实测 504，下载改后台任务，
+/// 完成/失败经本事件推送；shim 收到 ok 后再触发 apply）。
+#[derive(Serialize, Clone, Debug)]
+pub struct DownloadResult {
+    pub ok: bool,
+    pub staged: Option<String>,
+    pub error: Option<String>,
+}
+
 /// 统一事件帧（与桌面版事件名对应）。
 #[derive(Serialize, Clone, Debug)]
 pub struct Event {
@@ -80,6 +89,13 @@ impl Event {
         Self {
             event_type: "download-progress",
             payload: serde_json::to_value(p).unwrap_or_default(),
+        }
+    }
+
+    pub fn download_result(r: DownloadResult) -> Self {
+        Self {
+            event_type: "download-result",
+            payload: serde_json::to_value(r).unwrap_or_default(),
         }
     }
 

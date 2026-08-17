@@ -28,9 +28,11 @@
   // 帧会被丢弃——暂存后首次 listen 注册时以 replay:true 重放。上限 600（> daemon
   // 补发量 512，防丢帧）。 ----
   const MAX_PENDING_FRAMES = 600;
-  const pendingFrames: Array<{ type: string; payload: unknown }> = [];
+  let pendingFrames: Array<{ type: string; payload: unknown }> = [];
   // ---- updater 下载进度 Channel id（B6：download-progress 帧转发目标） ----
   let updateChannelId: number | null = null;
+  // ---- B9：异步下载结果事件等待上限（daemon 下载最长约 120s/源，兜底 10 分钟） ----
+  const DOWNLOAD_RESULT_TIMEOUT_MS = 10 * 60 * 1000;
   // ---- B8：下载阶段转发状态（Started 事件 + chunkLength 增量，见 ws.onmessage） ----
   let progressStarted = false;
   let progressLastDownloaded = 0;
@@ -395,7 +397,9 @@
 
     // 更新器：fnOS 自更新由 daemon 承载（B5）。
     // check → daemon /api/update/check（返回 {available, version, url, size}，无更新返回 null）；
-    // download_and_install → 依次触发 daemon 下载与应用（apply 后服务重启，前端提示"重启后生效"）。
+    // download_and_install → 异步下载（B9）：POST 立即返回，daemon 后台下载完成后经
+    // download-result 事件推送结果，收到 ok 后再触发 apply（网关 504 实测修复——
+    // fnOS 网关对应用请求有转发超时，同步等待下载必然超时）。
     if (plugin === "updater" && action === "check") {
       return fetch(`${gatewayPrefix()}/api/update/check`)
         .then((r) => r.json())
@@ -415,17 +419,46 @@
       // B8：每次下载从零开始累计增量（多条帧间增量，防进度回跳）
       progressStarted = false;
       progressLastDownloaded = 0;
+      // B9：先注册 download-result 监听（先于 POST，杜绝结果帧先到的竞态），
+      // 清理上次残留的监听与暂存帧
+      eventListeners.delete("download-result");
+      pendingFrames = pendingFrames.filter((f) => f.type !== "download-result");
+      const resultPromise = new Promise<null>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("下载更新超时（daemon 无响应），请重试")),
+          DOWNLOAD_RESULT_TIMEOUT_MS,
+        );
+        const resultId = transformCallback(
+          (data: unknown) => {
+            clearTimeout(timer);
+            eventListeners.delete("download-result");
+            const payload = (
+              (data as { payload?: { ok?: boolean; error?: string } })?.payload ?? {}
+            ) as { ok?: boolean; error?: string };
+            if (payload.ok) {
+              fetch(`${gatewayPrefix()}/api/update/apply`, { method: "POST" })
+                .then((r) => r.json())
+                .then((resp: { ok?: boolean; error?: string }) => {
+                  if (!resp.ok) throw new Error(resp.error || "应用更新失败");
+                  resolve(null);
+                })
+                .catch(reject);
+            } else {
+              reject(new Error(payload.error || "下载更新失败"));
+            }
+          },
+          true,
+        );
+        eventListeners.set("download-result", new Set([resultId]));
+      });
       return fetch(`${gatewayPrefix()}/api/update/download`, { method: "POST" })
         .then((r) => r.json())
         .then((resp: { ok?: boolean; error?: string }) => {
-          if (!resp.ok) throw new Error(resp.error || "下载更新失败");
-          return fetch(`${gatewayPrefix()}/api/update/apply`, { method: "POST" }).then((r) =>
-            r.json(),
-          );
-        })
-        .then((resp: { ok?: boolean; error?: string }) => {
-          if (!resp.ok) throw new Error(resp.error || "应用更新失败");
-          return null;
+          if (!resp.ok) {
+            eventListeners.delete("download-result");
+            throw new Error(resp.error || "下载更新失败");
+          }
+          return resultPromise;
         });
     }
     if (plugin === "updater") {

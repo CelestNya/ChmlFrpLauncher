@@ -252,6 +252,11 @@ describe("B6 updater 下载进度 Channel 转发", () => {
       type: "download-progress",
       payload: { downloaded: 15, total: 100, percentage: 15, stage: "downloading" },
     });
+    // B9：异步下载——daemon 完成后发 download-result 事件，promise 才 resolve
+    ws.emitMessage({
+      type: "download-result",
+      payload: { ok: true, staged: "/tmp/staged", error: null },
+    });
     await installing;
 
     // Started（补 contentLength→前端 percentage 才有分母） + 3 条 Progress
