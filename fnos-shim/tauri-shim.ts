@@ -401,7 +401,9 @@
     // download-result 事件推送结果，收到 ok 后再触发 apply（网关 504 实测修复——
     // fnOS 网关对应用请求有转发超时，同步等待下载必然超时）。
     if (plugin === "updater" && action === "check") {
-      return fetch(`${gatewayPrefix()}/api/update/check`)
+      // B10：主动检查绕过 daemon 5 分钟缓存（?force=1）——缓存旧提示会误导
+      // 「立即更新」（下载后才发现版本不一致），用户主动检查即拿最新状态。
+      return fetch(`${gatewayPrefix()}/api/update/check?force=1`)
         .then((r) => r.json())
         .then((resp: { ok?: boolean; data?: { available?: boolean } }) => {
           if (resp.ok && resp.data?.available) return resp.data;

@@ -174,8 +174,12 @@ async fn fetch_latest(checker: &UpdateChecker, force: bool) -> Result<UpdateInfo
 /// GET /api/update/check —— 检查是否有可用更新。
 pub async fn handle_check(
     axum::extract::State(state): axum::extract::State<crate::AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::Json<serde_json::Value> {
-    match fetch_latest(&state.update, false).await {
+    // force=1：绕过 5 分钟缓存（用户主动检查/点更新时拿最新状态；
+    // 2026-08-18 检验发现：缓存旧提示与更新源不一致会误导下载）
+    let force = params.get("force").map(|v| v == "1" || v == "true").unwrap_or(false);
+    match fetch_latest(&state.update, force).await {
         Ok(info) => axum::Json(serde_json::json!({ "ok": true, "data": info })),
         Err(e) => axum::Json(serde_json::json!({ "ok": false, "error": e })),
     }
