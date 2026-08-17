@@ -10,7 +10,7 @@ index 3e48667..42ee328 100644
  
  function App() {
    const [activeTab, setActiveTab] = useState("home");
-@@ -54,11 +55,11 @@ function App() {
+@@ -54,11 +55,13 @@ function App() {
    const { updateInfo, setUpdateInfo } = useUpdateCheck();
    const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
  
@@ -22,7 +22,9 @@ index 3e48667..42ee328 100644
 +  // 常量计算（fnOS：uiConfig 裁剪标题栏相关 UI，平台分支随配置关闭）
 +  const shouldShowTitleBar = uiConfig.titleBar ? (isMacOS ? showTitleBar : isWindows ? showTitleBar : true) : false;
 +  const isTitleBarHidden = uiConfig.titleBar && (isMacOS || isWindows) && !showTitleBar;
-+  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : false;
++  // fnOS（uiConfig 裁剪标题栏）：iframe 无系统标题栏，内容区仍保留 padding，
++  // 否则创建隧道等按钮紧贴窗口上沿（美观度优化，2026-08-15）
++  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : true;
 +  const SIDEBAR_LEFT = uiConfig.titleBar && isMacOS && !showTitleBar ? 10 : 15;
    const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
  
