@@ -226,7 +226,7 @@ describe("B6 updater 下载进度 Channel 转发", () => {
     vi.unstubAllGlobals();
   });
 
-  it("download-progress 帧转发给登记的 Channel（进度条不再恒 0）", async () => {
+  it("download-progress 帧转为桌面插件形态（Started + chunkLength 增量，进度不再恒 0）", async () => {
     const progress: unknown[] = [];
     // plugin-updater 真实形态：invoke(cmd, { onEvent: channel, rid, ... })
     // Channel 经 transformCallback 序列化为数字 id
@@ -238,15 +238,50 @@ describe("B6 updater 下载进度 Channel 转发", () => {
     });
 
     const ws = (window as unknown as { __LAST_WS__?: MockWS }).__LAST_WS__!;
+    // 阶段 1：connecting（daemon 首帧：total 未知）
     ws.emitMessage({
       type: "download-progress",
-      payload: { downloaded: 5, total: 100 },
+      payload: { downloaded: 0, total: 0, percentage: 0, stage: "connecting" },
+    });
+    // 阶段 2：downloading（带 Content-Length 的真实进度帧）
+    ws.emitMessage({
+      type: "download-progress",
+      payload: { downloaded: 5, total: 100, percentage: 5, stage: "downloading" },
+    });
+    ws.emitMessage({
+      type: "download-progress",
+      payload: { downloaded: 15, total: 100, percentage: 15, stage: "downloading" },
     });
     await installing;
 
-    expect(progress).toHaveLength(1);
-    const ev = progress[0] as { event: string; data: { downloaded: number } };
-    expect(ev.event).toBe("Progress");
-    expect(ev.data.downloaded).toBe(5);
+    // Started（补 contentLength→前端 percentage 才有分母） + 3 条 Progress
+    expect(progress).toHaveLength(4);
+    const started = progress[0] as { event: string; data: { contentLength: number; stage: string } };
+    expect(started.event).toBe("Started");
+    expect(started.data.contentLength).toBe(0); // 首帧 total 未知（connecting）
+    expect(started.data.stage).toBe("connecting");
+
+    const ev1 = progress[1] as {
+      event: string;
+      data: { chunkLength: number; contentLength: number; percentage: number; stage: string };
+    };
+    expect(ev1.event).toBe("Progress");
+    expect(ev1.data.chunkLength).toBe(0); // connecting 帧自身无增量
+    expect(ev1.data.contentLength).toBe(0);
+    expect(ev1.data.stage).toBe("connecting");
+
+    const ev2 = progress[2] as {
+      event: string;
+      data: { chunkLength: number; contentLength: number; percentage: number; stage: string };
+    };
+    expect(ev2.event).toBe("Progress");
+    expect(ev2.data.chunkLength).toBe(5); // 首条真实下载帧：增量 = 当前累计
+    expect(ev2.data.contentLength).toBe(100);
+    expect(ev2.data.percentage).toBe(5);
+    expect(ev2.data.stage).toBe("downloading");
+
+    const ev3 = progress[3] as { event: string; data: { chunkLength: number } };
+    expect(ev3.event).toBe("Progress");
+    expect(ev3.data.chunkLength).toBe(10); // 增量：15 - 5
   });
 });
