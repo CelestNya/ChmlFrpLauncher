@@ -1,6 +1,6 @@
 # Handoff — ChmlFrpLauncher fnOS 移植
 
-> 最后更新：2026-08-13
+> 最后更新：2026-08-19
 > 本文件是**持久化交接文档**：记录当前工作状态、待决策事项、关键上下文，随代码变更实时更新。
 > 新会话先读本文件 + `docs/development.md`（开发须知）+ `docs/architecture.md`（架构状态）。
 > 敏感信息（NAS 凭据）不入本文件，见环境提示。
@@ -9,57 +9,65 @@
 
 ## 当前状态（一句话）
 
-**前后端分离重构已完成（阶段 0-5）+ fnOS API 契约/adapter 架构已落地（ADR-0005）**：token/代理配置经 shim 重定向离浏览器 localStorage 落 daemon 文件（0600），壁纸 fnOS 砍轮播 + 文件化，能力协商替代 NO_OP；`fnos-api/` 契约（六面 + apiVersion 1.0.0）+ 第一个 adapter v0.7.5（能力覆盖验证 33 命令全通过）+ 需求→bump→适配→开发流程入库。全量回归绿（daemon 66 / vitest 45 / tsc / eslint / patch 可应用）。
+**架构 2 定版已落地并发版 v0.7.5-2.0.0（2026-08-19）**：四分支矩阵（main 干净基线+快照 / adapter 纯契约层 / mod 业务+shim+持久化 / patcher 前端开发台）；padding 配置化根治（uiConfig.padTop，crop 零手工维护段）；adapter API 1.1.0（download-result 事件 + storage/httpApi 契约段）。**v0.7.5-2.0.1 发版进行中**（镜像源换血：移除死源 + 每源独立连接超时），CI 构建中，NAS 回滚 2.0.0 → 在线更新 2.0.1 验证待用户操作。
 
 ## 待决策事项
 
-1. **verify-adapter.sh 接入 CI**：目前是手动校验（development.md 已记录），可选加轻量 job 到 patchgen workflow 使「patch 对 API 硬依赖」自动强制。
-2. **发版策略**：上游 Latest = v0.7.5（2026-05-20），v0.8.0 仅 develop WIP。**版本号与上游同步、不 bump**（升级走 uninstall→install）；跟随上游节奏暂不发 release。
-3. **遗留项**：见 `docs/development.md` §七（自更新通道、daemon 自保、OAuth CORS、UI 适配、WS seq）。
+1. **fnos-patchgen.yml 适配四分支**（进行中遗留）：现只 PR patches/ 到 main，未含 adapter 的 fnos-api 变更（crop 需单独走 adapter 分支）。架构定版后此工作流未更新。
+2. **镜像源候选池**：已实测 gh-proxy.com 可用（4MB/s）；如后续失效需重新摸底国内 GitHub 加速镜像。当前列表只留官方 + gh-proxy.com。
+3. **NAS 在线更新验证（本次待办）**：NAS 回滚 2.0.0 → 模拟源指向真实 2.0.1 GitHub asset → 验证镜像回退链路（官方死 → gh-proxy 成功）。**需用户授权/操作。**
 
-## 已完成里程碑（2026-08-13）
+## 已完成里程碑（2026-08-13 ~ 08-19）
 
 | 里程碑 | 证据 |
 |--------|------|
-| 基线切上游 develop (v0.8.0 WIP) | main src/ == upstream/develop（0 侵入） |
-| 六批 TDD 修复 (A-F) | daemon 66 / vitest 45 / lib.sh 9 全绿 |
-| CI 修复（pnpm 11 / Node 22） | 双架构构建 success |
-| 版本号同步 0.8.0 | manifest / Cargo.toml / package.json / Cargo.lock |
-| NAS 部署 + 人工测试 | `docs/plans/fnos-nas-test-checklist.md` |
-| 守护默认开启修复 | patcher 0ddb15e + PR #13 |
-| 市场升级 dist 权限修复 | patcher 34bc1d9（build-fpk.sh chmod go-w） |
-| **前后端分离重构（阶段 0-5）** | CONTEXT.md + docs/adr/0001-0004；shim 重定向 + daemon 存储 + 壁纸文件化 + capabilities |
-| **fnOS API 契约 + adapter 架构（ADR-0005）** | fnos-api/API.md + adapters/v0.7.5/manifest.json + verify-adapter.sh（33 命令覆盖验证通过）+ development.md §patch 机制；双分支提交 9c763df/6a8b775 |
+| 前后端分离重构（ADR-0001~0004） | shim 重定向 + daemon 存储 + 壁纸文件化 + capabilities |
+| fnOS API 契约 + adapter（ADR-0005） | fnos-api/API.md + adapters/v0.7.5/manifest.json + verify-adapter.sh |
+| 更新流程改进（功能位 6，改进批 1+2） | 分阶段进度/多源退避/异步化(504)/自动刷新/日志持久化/force 检查 |
+| 发版 v0.7.5-1.6.0（2026-08-18） | 组合快照 4e4b683 + tag + CI 双架构 fpk + release + bundle |
+| **架构 2 定版（2026-08-19）** | 四分支矩阵 + 分支更名 patch→mod + padding 配置化根治 + API 1.1.0 |
+| **发版 v0.7.5-2.0.0（2026-08-19）** | 快照 ead7dc4 + tag + CI 全绿 + release + 双架构 bundle + 正式发行说明 |
+| **v0.7.5-2.0.1（2026-08-19，进行中）** | 镜像源换血（Cargo/fpk/patches 三处版本对齐）+ 快照 592295c + CI 跑批 |
+| NAS 真机验证 | 1.6.1→2.0.0 更新链路走通（用户验收：padding 正常、更新成功） |
 
-## 最近提交（patcher）
+## 最近提交（各分支 HEAD）
 
 ```
-9c763df feat(fnos): 落地 fnOS API 契约 + adapter v0.7.5（ADR-0005）
-1eb476c docs(fnos): 归档 NAS 真机验证（review 状态表 + patch 维护文档）
-04bc96d docs(fnos): NAS 测试清单归档 dist 权限修复与守护默认开启验证
-34bc1d9 fix(fnos): build-fpk 打包时收紧 dist 权限（市场升级不替换 dist 修复）
-0ddb15e fix(fnos): fnOS 环境进程守护默认开启
-2234598 chore(fnos): 版本号 0.7.5→0.8.0 同步
+main:        592295c release: v0.7.5-2.0.1 组合快照（镜像源换血 + 每源独立超时）
+adapter/v0.7.5: beaab00 refactor(adapter): API 1.1.0 + padding 配置化 crop
+mod:         5785d02 fix(mod): 镜像源换血 + 版本 2.0.1
+patcher:     4ed14d3 chore: gitignore 交付产物目录 dist-release-200/
 ```
 
 ## 关键环境
 
 - **工作目录**：D:\Projects\2026-SummerHoliday\ChmlFrpLauncher
-- **fork**：CelestNya/ChmlFrpLauncher · 上游：TechCat-Team/ChmlFrpLauncher（develop 基线）
-- **NAS**：192.168.12.32（SSH 凭据在 `C:\Users\CelestNya\AppData\Local\Temp\nas-*.py`）；访问 `https://nas.letian.us.kg/app/chmlfrp`
-- **CI**：fnos-build.yml（构建 .fpk）/ fnos-patchgen.yml（patch 自动 PR）/ fnos-upstream-follow.yml（上游自动跟随，每 6h 轮询）
+- **fork**：CelestNya/ChmlFrpLauncher · 上游：TechCat-Team/ChmlFrpLauncher（v0.7.5 基线）
+- **worktrees**：chmlfrp-wt-mod（mod）/ chmlfrp-wt-adapter（adapter）/ chmlfrp-wt-main（main，发版快照用）
+- **NAS**：192.168.12.32（SSH 凭据在 `C:\Users\CelestNya\AppData\Local\Temp\nas-*.py`，最新 nas-deploy-200.py）；访问 `https://nas.letian.us.kg/app/chmlfrp`
+- **CI**：fnos-build.yml（tag v* 触发双架构 fpk + attach bundles）/ fnos-patchgen.yml（待适配）/ fnos-upstream-follow.yml（上游自动跟随）
+- **本地交付物**：`dist-release-200/`（2.0.0 双 fpk + 双 bundle，gitignore 已排除）
 
-## 关键经验（详见项目记忆）
+## 关键经验（发版/部署防踩坑）
 
-1. **install-fpk 必须带 --volume 1**；install-local 会删 appdata 数据目录（8/13 事故）
-2. **市场升级不替换 777 目录**——dist 权限已修（chmod go-w）；自更新不受影响
-3. **守护日志走 WS 广播不进文件**——SSH 看不到，看前端日志页
-4. **守护默认关闭**：桌面版 localStorage 逻辑，fnOS 已修默认开启（__FNOS__ 门控）
-5. **真机鉴权**：平台不注入 TRIM_GATEWAY/DAEMON_TOKEN → 生产实际 None 模式，安全 = socket 0600 + 网关独占
+1. **快照禁止 `git add -f fnos-daemon` 整目录**——会拖进 target/ 编译产物（134MB 超 GitHub 100MB 限制被拒；已两次踩坑）。精确 add：`fnos-daemon/Cargo.toml` + `Cargo.lock` + `src/` + `fnos-pack/*`。
+2. **版本三处对齐**（fpk manifest = Cargo.toml = patches manifest），CI 的 build-fpk 校验不一致直接 fail。
+3. **tag 已推远端后 amend 快照**：需 `git push --force` tag（--force-with-lease 会拒绝 tag 更新），且 force push 会触发新 CI run（旧 run 产物作废）。
+4. **坏快照被 push 后无法立即清除**：force push 移动分支/tag 指针，坏 commit 留对象库等 gc——不影响后续。
+5. **install-fpk 必须带 --volume 1**；install-local 会删 appdata 数据目录（8/13 事故）。
+6. **模拟源**：bundle + update-api.json 放 daemon 静态托管 `dist/`，browser_download_url 必须带 `/app/chmlfrp/` 前缀；UPDATE_API_URL 注入 cmd/main（`${TRIM_SERVICE_PORT}` 网关端口）；appcenter-cli 需 sudo（rpcbroker 权限）。
+7. **daemon 只能在 Linux/musl 工具链编译**（Windows 本地缺 x86_64-linux-musl-gcc）——发版靠 CI。
+8. **镜像实测**（2026-08-18）：官方直连被墙（30s+）；ghproxy.com/mirror.ghproxy.com 已死；gh-proxy.com 可用 4MB/s。
+
+## 待办（下个会话）
+
+- [ ] 查 v0.7.5-2.0.1 CI 结果 → 创建/更新 release + 正式发行说明 → 下载 bundle 到 dist-release-201/
+- [ ] NAS 回滚 2.0.0（用 dist-release-200/ 的 x86 bundle 恢复 target）+ 模拟源指向真实 2.0.1 GitHub asset → 用户在线更新验证镜像回退
+- [ ] fnos-patchgen.yml 适配四分支（纳入 adapter 变更路径）
+- [ ] NAS 只读优先原则：所有写操作先征得用户同意
 
 ## Suggested skills（下个 agent）
 
-- 上游 PR 准备：`code-review`（从基线审变更）
-- 继续部署/测试：按 `docs/plans/fnos-nas-test-checklist.md` 手测
+- 继续发版/部署：按 `docs/development.md` §七发版流程 + 本文件待办
 - 诊断问题：`superpowers:systematic-debugging`（先定位根因再改）
-- 规划发版：先读 `docs/development.md` §六，再与用户确认是否跟随上游
+- 架构变更：先读 `docs/architecture.md` + grill 对齐用户再动
