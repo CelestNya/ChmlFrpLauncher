@@ -1,11 +1,11 @@
 {
   "schemaVersion": 2,
-  "patchSetVersion": "2.0.0",
+  "patchSetVersion": "2.0.1",
   "description": "fnOS mod 层版本声明。patchSetVersion 按「架构.功能.修复」定义（2026-08-16 用户决策）：架构（major）= 破坏性架构变更（uiConfig 格式/契约面/shim 重构）；功能（minor）= 新功能/能力一代 +1；修复（patch）= bug 修复 +1。E4 联合版本号 = app 版本 + patchSetVersion（如 0.7.5-2.0.0）。每个 patch 的 featureVersion 为其自身演进；requires.api = 对 fnOS API 的硬依赖（构建期校验：requires.api ≤ adapter.apiVersion）。",
   "patches": [
     {
       "file": "fnos-feature-patch.patch",
-      "featureVersion": "2.0.0",
+      "featureVersion": "2.0.1",
       "features": "功能 6 代（更新流程升级延承自 1.6.0：分阶段下载/镜像退避/失败重试/自动刷新/异步化/日志持久化/force 检查）；架构 2 代：mod 层定版（业务 + shim + 持久化，仅调用 adapter 标准化接口）",
       "requires": {
         "api": ">=1.1.0"
@@ -57,6 +57,11 @@
       "version": "2.0.0",
       "date": "2026-08-19",
       "note": "架构 2 代：adapter 纯契约层定版（API 1.1.0——events 补 download-result、新增存储契约段、uiConfig 升 schema 2 加 padTop 配置）；分支 patch 更名 mod（业务 + shim + 持久化层，仅调用 adapter 标准化接口，src 测试文件回归 patcher）；padding 配置化根治（shouldPadTop 兜底读 uiConfig.padTop——crop 零手工维护段，E9 手工保护升级为配置守护）。E4 联合号 0.7.5-2.0.0"
+    },
+    {
+      "version": "2.0.1",
+      "date": "2026-08-19",
+      "note": "修复：下载镜像源换血（移除已死 ghproxy.com / mirror.ghproxy.com，保留官方 + gh-proxy.com）；每源独立连接超时（官方 30s / 镜像 10s，防死源拖住下载）。E4 联合号 0.7.5-2.0.1"
     }
   ]
 }

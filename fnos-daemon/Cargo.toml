@@ -1,6 +1,6 @@
 [package]
 name = "chmlfrp-daemon"
-version = "0.7.5-2.0.0"
+version = "0.7.5-2.0.1"
 description = "ChmlFrp fnOS 守护进程（axum 版隧道管理服务）"
 license = "Apache-2.0"
 edition = "2021"
