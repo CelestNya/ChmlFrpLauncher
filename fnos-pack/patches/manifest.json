@@ -1,14 +1,14 @@
 {
   "schemaVersion": 2,
-  "patchSetVersion": "1.6.0",
-  "description": "fnOS patch 集版本声明。patchSetVersion 按「架构.功能.修复」定义（2026-08-16 用户决策）：架构（major）= 破坏性架构变更（uiConfig 格式/契约面/shim 重构）；功能（minor）= 新功能/能力一代 +1；修复（patch）= bug 修复 +1。E4 联合版本号 = app 版本 + patchSetVersion（如 0.7.5-1.5.2）。每个 patch 的 featureVersion 为其自身演进；requires.api = 对 fnOS API 的硬依赖（构建期校验：requires.api ≤ adapter.apiVersion）。",
+  "patchSetVersion": "2.0.0",
+  "description": "fnOS mod 层版本声明。patchSetVersion 按「架构.功能.修复」定义（2026-08-16 用户决策）：架构（major）= 破坏性架构变更（uiConfig 格式/契约面/shim 重构）；功能（minor）= 新功能/能力一代 +1；修复（patch）= bug 修复 +1。E4 联合版本号 = app 版本 + patchSetVersion（如 0.7.5-2.0.0）。每个 patch 的 featureVersion 为其自身演进；requires.api = 对 fnOS API 的硬依赖（构建期校验：requires.api ≤ adapter.apiVersion）。",
   "patches": [
     {
       "file": "fnos-feature-patch.patch",
-      "featureVersion": "1.5.1",
-      "features": "功能 5 代：守护默认开启/WS 重连 replay 去重/日志清空联动/壁纸砍轮播/音效网关前缀；修复：掉登录（token 并发刷新）",
+      "featureVersion": "2.0.0",
+      "features": "功能 6 代（更新流程升级延承自 1.6.0：分阶段下载/镜像退避/失败重试/自动刷新/异步化/日志持久化/force 检查）；架构 2 代：mod 层定版（业务 + shim + 持久化，仅调用 adapter 标准化接口）",
       "requires": {
-        "api": ">=1.0.0"
+        "api": ">=1.1.0"
       }
     }
   ],
@@ -46,7 +46,17 @@
     {
       "version": "1.6.0",
       "date": "2026-08-18",
-      "note": "功能第 6 代：更新流程升级——分阶段下载进度（连接/下载/校验/应用）/多源镜像退避（官方+ghproxy 线路优选）/失败重试态 UI/更新完成自动刷新/下载异步化（网关 504）/frpc 日志持久化文件（软件内更新重启不丢）/force 检查。发版版本。E4 联合号 0.7.5-1.6.0"
+      "note": "功能位 6（更新流程升级）：分阶段下载进度（连接/下载/校验/应用）/多源镜像退避（官方+ghproxy 线路优选）/失败重试态 UI/更新完成自动刷新/下载异步化（网关 504）/frpc 日志持久化文件/force 检查。发版版本。E4 联合号 0.7.5-1.6.0"
+    },
+    {
+      "version": "1.6.1",
+      "date": "2026-08-18",
+      "note": "修复：crop 内容区上 padding 二次回归（gen-patch 全量重新生成覆盖 adapter 手工维护项）；gen-patch E9 保护（手工标记校验，丢失即拦截）。E4 联合号 0.7.5-1.6.1（未发版，被 2.0.0 取代）"
+    },
+    {
+      "version": "2.0.0",
+      "date": "2026-08-19",
+      "note": "架构 2 代：adapter 纯契约层定版（API 1.1.0——events 补 download-result、新增存储契约段、uiConfig 升 schema 2 加 padTop 配置）；分支 patch 更名 mod（业务 + shim + 持久化层，仅调用 adapter 标准化接口，src 测试文件回归 patcher）；padding 配置化根治（shouldPadTop 兜底读 uiConfig.padTop——crop 零手工维护段，E9 手工保护升级为配置守护）。E4 联合号 0.7.5-2.0.0"
     }
   ]
 }

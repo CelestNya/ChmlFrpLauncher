@@ -2,7 +2,7 @@
 # fnos-pack/gen-patch.sh
 # 从组合工作区生成 fnOS 前端 patch（crop + feature），双输出源（2026-08-16 决策）：
 #   crop patch（UI 裁剪）→ fnos-api/adapters/<ver>/ui-crop.patch（提交 adapter 分支）
-#   feature patch（功能）→ fnos-pack/patches/fnos-feature-patch.patch（提交 patch 分支）
+#   feature patch（功能）→ fnos-pack/patches/fnos-feature-patch.patch（提交 mod 分支）
 # 文件清单从 adapter manifest 的 uiFiles 字段读（配置驱动：清单权威归 adapter）。
 #
 # 用法（组合工作区：src 为应用态，仓库根目录执行）:
@@ -44,21 +44,33 @@ git rev-parse --verify "$BASE" >/dev/null 2>&1 || {
   exit 1
 }
 
-# 组合态检查：crop 输出写 adapter 目录、feature 输出写 patch 目录，
-# 生成后分别在对应分支提交（改裁剪 → 提交 adapter/v0.7.5；改功能 → 提交 patch）
+# 组合态检查：crop 输出写 adapter 目录、feature 输出写 mod 目录，
+# 生成后分别在对应分支提交（改裁剪 → 提交 adapter/v0.7.5；改功能 → 提交 mod）
 if [ ! -d "$PATCH_DIR" ]; then
-  echo "[gen-patch] ⚠️ 缺少 fnos-pack/patches/（组合态缺失：请先 checkout patch 分支的 fnos-pack/）" >&2
+  echo "[gen-patch] ⚠️ 缺少 fnos-pack/patches/（组合态缺失：请先 checkout mod 分支的 fnos-pack/）" >&2
   exit 1
 fi
 
 # 生成 crop patch（UI 裁剪，git 双树格式，patch -p1 可应用）
 git diff "$BASE" -- "${UI_FILES[@]}" > "$CROP_OUT"
+# E9 padding 配置化守护（2026-08-18 二次回归教训，2026-08-19 配置化根治）：
+# shouldPadTop 兜底分支读 uiConfig.padTop（adapter manifest 配置，构建期生成 fnos-ui-config.ts）。
+# 配置驱动后 crop 无需任何手工维护段——gen-patch 重新生成天然保留引用；
+# 此处校验「配置项在 manifest + crop 引用在 patch」双在，防将来退化为硬编码。
+if ! python3 -c "import json,sys; assert 'padTop' in json.load(open(sys.argv[1]))['uiConfig']['values']" "$PY_MANIFEST"; then
+  echo "[gen-patch] ❌ adapter manifest 缺少 uiConfig.values.padTop（padding 配置化契约缺失）" >&2
+  exit 1
+fi
+if ! grep -q "uiConfig.padTop" "$CROP_OUT"; then
+  echo "[gen-patch] ❌ crop 丢失 padding 配置化引用（App.tsx shouldPadTop 兜底应读 uiConfig.padTop）" >&2
+  exit 1
+fi
 # 生成 feature patch
 git diff "$BASE" -- "${FEATURE_FILES[@]}" > "$PATCH_DIR/fnos-feature-patch.patch"
 
 echo "[gen-patch] ✅ 已生成:"
 echo "  $CROP_OUT       ($(grep -c '^---' "$CROP_OUT") 文件，提交 adapter 分支)"
-echo "  fnos-feature-patch.patch  ($(grep -c '^---' "$PATCH_DIR/fnos-feature-patch.patch") 文件，提交 patch 分支)"
+echo "  fnos-feature-patch.patch  ($(grep -c '^---' "$PATCH_DIR/fnos-feature-patch.patch") 文件，提交 mod 分支)"
 
 # E6：差异完整性自检——src/ 相对基线的全部差异必须被登记清单覆盖
 #（useTunnelProgress 教训：漏登记 = 修复不进产物且 dry-run 自检仍通过）。
