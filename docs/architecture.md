@@ -347,17 +347,57 @@ updater 插件（minisign 签名，公钥内置于 tauri.conf.json）：`https:/
 - ✅ **可复用**：process / process_guard / process_persistence / custom_tunnel / download / http / ping / ports 全部移植到 daemon
 - ✅ **鉴权形态（真机实测 2026-08-13）**：平台不注入 TRIM_GATEWAY/DAEMON_TOKEN → 生产实际 None 模式；安全 = socket 0600 + 仅回环监听 + 网关独占
 
-### fnOS 前端双分支 patch 机制
+### fnOS 四分支矩阵（2026-08-19 架构定版）
 
 ```
-main ──── 纯净上游 + patch 文件 + 构建链（apply-patches / build-fpk / gen-patch / CI）
-              ↑ PR（仅 patches/，CI 自动开）
-patcher ── main + src/ 侵入式 fnOS 改动（开发态）
+main ──────── 干净基线（src/ 与上游一致，0 侵入）+ 每次发版的组合快照（fnos-* 目录 force-add）
+adapter/v0.7.5 ── fnos-api 纯契约层（manifest + crop patch + 生成/校验脚本），只暴露标准化接口
+mod ──────── fnos-daemon + fnos-shim + fnos-pack（业务实现 + shim + 持久化 + 打包链）
+patcher ──── 前端开发台（src/ 上的侵入式 fnOS 改动 + 测试文件），gen-patch 的差异源
 ```
 
-- **基线 = 上游 develop**（v0.8.0 WIP）；main 的 src/ == upstream/develop（0 侵入不变式，patchgen CI 断言）
-- feature patch 11 文件（含守护默认开启修复：useAppInitialization + useProcessGuard）
-- 维护细节见 `docs/development.md` §patch 机制
+职责边界（用户 2026-08-16 决策定版）：
+
+- **adapter = 纯契约层**：只暴露标准化接口 + 配置（命令/事件/存储/HTTP/UI），不含业务实现、不含 shim。UI 裁剪（含 padding）统一进 `uiConfig` 配置，构建期由 manifest 生成，零手工维护段。
+- **mod = 业务 + shim 实现层**：实现 daemon 命令、持久化（credential/node_settings/frpc 日志 0600）、shim 运行时模拟、打包链；仅调用 adapter 接口，完全不感知上游版本差异。
+- **存储归 mod 持久化**：adapter 的 `capabilities.storage` 只登记归属与权限（契约），落盘实现全在 mod。
+- **patcher = 前端开发台**：src 改动 + 测试文件（`*.test.ts` 不进 patch、不进产物、main 保持 0 侵入），gen-patch 以 patcher 为差异源。
+
+### fnOS API 版本化 + adapter 适配层（2026-08-13 ADR-0005，2026-08-19 升 1.1.0）
+
+**三层解耦**：上游程序（服务面，不可控）→ adapter（每上游版本一个，纯契约）→ API 契约（fnos-api，可控、版本化）→ mod 业务逻辑（对 API 版本硬依赖）。
+
+```
+上游 chmlfrp（服务面，不可控，0.7.5 基线）
+    ↓ adapter 映射（每版本一个，纯契约层，adapterVersion = {基线}-{apiVersion}）
+API 契约 fnos-api（可控，apiVersion 1.1.0）
+    ↓ mod 业务逻辑（manifest 声明 requires: {api: ">=1.1.0"} 硬依赖）
+fnOS 适配实现（daemon + shim）
+```
+
+- **契约位置**：`fnos-api/API.md`（六面：命令/事件/存储/HTTP/UI/插件）；`fnos-api/adapters/v0.7.5/manifest.json`（能力面声明）；`verify-adapter.sh`（前端 invoke 调用 ⊆ adapter 能力面 + uiConfig 键校验 + 手写 fnos-ui-config 与 manifest 生成版一致）
+- **命令面**：45 上游命令 + fnOS 扩展（凭据 4 / 节点设置 2 / 壁纸 5 / clear_log_history / capabilities）
+- **事件面（1.1.0 补录）**：`frpc-log` / `download-progress` / `download-result`（B9 异步下载结果推送）/ `tunnel-auto-restarted`
+- **存储契约（1.1.0 新增）**：`credential.json`（0600）/ `node_settings.json`（0600）/ frpc 日志（轮转 .1，0600）/ 背景文件（0644）——adapter 登记权属与模式，mod 实现落盘
+- **HTTP 面（1.1.0 新增）**：`bootstrap` / `invoke` / `ws/logs` / `update/{check,download,apply}`（check 支持 `force=1` 绕过缓存）
+- **版本化规则**：apiVersion 按接口演进 semver（major=破坏 / minor=新增 / patch=修复）；**上游更新 ≠ API 更新**——仅接口形态变化才 bump（0.7.5/0.8.0 命令面 diff 零，adapter 命令映射跨版本零工作量）
+- **patchSetVersion = 架构.功能.修复**（mod 层版本，2026-08-16 用户决策）：架构 2 = adapter 纯契约定版 + API 1.1.0 + mod 更名 + padding 配置化（2.0.0）；功能 6 = 更新流程升级（1.6.0）；E4 联合号 = app 版本 + patchSetVersion（0.7.5-2.0.0）贯穿 fpk manifest / Cargo.toml / package.json
+
+### 更新流程（改进批 1+2，功能位 6）
+
+| 机制 | 位置 | 说明 |
+|------|------|------|
+| 分阶段下载进度 | `update.rs` + `UpdateDialog.tsx` | 连接→下载→校验→应用四阶段 |
+| 多源镜像退避 | `update.rs` `mirror_urls` | 官方 GitHub 优先 + ghproxy 系列，各源退避，错误聚合 |
+| 下载异步化（B9） | `update.rs` | fnOS 网关 504 → POST 立即返回 + 后台任务 + download-result 事件 |
+| 更新完成自动刷新（B8） | `tauri-shim.ts` | WS 重连比对 /api/bootstrap 版本 → overlay + reload |
+| 失败重试 UI | `UpdateDialog.tsx` | 聚合错误限高滚动 + 重试 |
+| 检查强制刷新（B10） | `update.rs` | `check?force=1` 绕过 5 分钟缓存 |
+| 防降级 | `update.rs` `verify_bundle` | 更新包版本不高于当前即拒绝 |
+
+### padding 配置化（2026-08-19 根治）
+
+`shouldPadTop` 兜底分支读 `uiConfig.padTop`（adapter manifest 配置项，构建期生成）。padding 不再依赖 crop 手工维护段——gen-patch 重新生成天然保留（根治 1.5.5 / 1.6.1 两次回归）。守护：gen-patch 校验「padTop 在 manifest + 引用在 crop」双在；apply-patches 校验 `padTop: false` 即拦截 + App.tsx 必须引用 `uiConfig.padTop`。
 
 ### 前后端分离重构（2026-08-13，ADR-0001~0004）
 
@@ -378,24 +418,6 @@ daemon credential.json / node_settings.json（0600）
 - **壁纸文件化**：`fnos-daemon/src/background.rs` + `/assets/backgrounds/` 静态托管；fnOS 砍轮播（ADR-0004）
 - **首帧 boot**：daemon `serve_index_with_boot` 注入 `__FNOS_BOOT__`（credential+nodeSettings），shim 同步读防闪烁
 - **渲染类偏好留守 localStorage**（ADR-0003：首帧同步读约束）；行为类 4 项后端化
-
-### fnOS API 版本化 + adapter 适配层（2026-08-13，ADR-0005）
-
-**三层解耦**：上游程序（服务面，不可控）→ adapter（每上游版本一个）→ API 契约（fnos-api，可控、版本化）→ patch 业务逻辑（对 API 版本硬依赖）。
-
-```
-上游 chmlfrp（服务面，不可控，上游 develop/main 双线）
-    ↓ adapter 映射（每版本一个，版本号 = API 版本）
-API 契约 fnos-api（可控，版本化 apiVersion）
-    ↓ patch 业务逻辑（manifest 声明 requires: {api: ">=X"} 硬依赖）
-fnOS 适配实现（daemon + shim）
-```
-
-- **契约位置**：`fnos-api/API.md`（六面：命令/事件/插件/存储/HTTP/UI，apiVersion 1.0.0）；`fnos-api/adapters/<上游版本>/manifest.json`（能力面声明）；`verify-adapter.sh`（前端 invoke 调用 ⊆ adapter 能力面校验）
-- **命令面**：45 上游命令 + fnOS 扩展（凭据 4 / 节点设置 2 / 壁纸 5 / clear_log_history / capabilities）
-- **版本化规则**：adapter 版本号 = API 版本号（不是上游版本号）；上游更新 ≠ API 更新，仅接口形态变化才 bump
-- **事实核查**：0.7.5 与 0.8.0-dev 命令面完全一致（45 命令 diff 零）→ adapter 命令映射跨版本零工作量
-- 开发流程（需求→bump→适配→开发）见 `docs/development.md` §patch 机制
 
 ### 现有技术债
 
