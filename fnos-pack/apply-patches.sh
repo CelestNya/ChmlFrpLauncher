@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # fnos-pack/apply-patches.sh
-# fnOS 构建链：在临时副本上应用 feature patch（patch 分支）+ crop patch（adapter 分支），
+# fnOS 构建链：在临时副本上应用 feature patch（mod 分支）+ crop patch（adapter 分支），
 # 随后构建前端并注入 shim。UI 裁剪归 adapter（2026-08-16 决策）：crop 路径从
-# adapter manifest 的 uiCropPatch 字段读，构建期应用，patch 分支零裁剪代码。
+# adapter manifest 的 uiCropPatch 字段读，构建期应用，mod 分支零裁剪代码。
 # 源码副本不落盘到仓库（形态 C：工作树 src/ 零改动）。
 #
 # 用法（仓库根目录执行）:
@@ -17,7 +17,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # 纯函数库（E1 目录校验等，可独立单测：bash fnos-pack/tests/lib.test.sh）
 source "$REPO_ROOT/fnos-pack/lib.sh"
-# 功能 patch（patch 分支持有）
+# 功能 patch（mod 分支持有）
 FEATURE_PATCH_FILE="$REPO_ROOT/fnos-pack/patches/fnos-feature-patch.patch"
 # UI 裁剪 patch（adapter 分支持有；路径从 manifest 读）
 ADAPTER_MANIFEST="$REPO_ROOT/fnos-api/adapters/v0.7.5/manifest.json"
@@ -98,7 +98,17 @@ if grep -q "antivirusWarningDialog: true" "$TMP_WORK/src/fnos-ui-config.ts"; the
   echo "[fnos-pack] ❌ uiConfig.antivirusWarningDialog 为 true（杀软警告未裁剪）" >&2
   exit 1
 fi
-echo "[fnos-pack] ✅ UI 精简验证通过（uiConfig 配置驱动：TitleBar / 杀软警告已裁剪）"
+# padding 配置化（2026-08-19 根治）：uiConfig.padTop 必须为 true（fnOS 无标题栏需顶栏 padding），
+# 且 App.tsx 兜底分支读 uiConfig.padTop（非硬编码 false——历史回归根源）。
+if grep -q "padTop: false" "$TMP_WORK/src/fnos-ui-config.ts"; then
+  echo "[fnos-pack] ❌ uiConfig.padTop 为 false（无标题栏时顶栏 padding 缺失——回归根源）" >&2
+  exit 1
+fi
+if ! grep -q "uiConfig.padTop" "$TMP_WORK/src/App.tsx"; then
+  echo "[fnos-pack] ❌ App.tsx 未引用 uiConfig.padTop（padding 配置化未生效）" >&2
+  exit 1
+fi
+echo "[fnos-pack] ✅ UI 精简验证通过（uiConfig 配置驱动：TitleBar / 杀软警告已裁剪，padTop 配置化在效）"
 
 # 验证 feature patch 关键修复已应用（fnOS 专属逻辑存在性）
 if ! grep -q "__FNOS__" "$TMP_WORK/src/components/pages/Settings/hooks/useBackgroundImage.ts"; then
