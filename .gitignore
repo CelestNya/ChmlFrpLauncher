@@ -33,3 +33,4 @@ data
 
 # fnos 构建缓存（勿提交）
 .fnpack-cache/
+dist-release-200/
