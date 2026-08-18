@@ -55,10 +55,11 @@ function App() {
   const { updateInfo, setUpdateInfo } = useUpdateCheck();
   const { showAntivirusWarning, setShowAntivirusWarning } = useFrpcDownload();
 
-  // 常量计算（fnOS：uiConfig 裁剪标题栏相关 UI，平台分支随配置关闭）
+  // 常量计算（fnOS：uiConfig 裁剪标题栏相关 UI，平台分支随配置关闭；
+  // 无标题栏时的顶部 padding 由 uiConfig.padTop 驱动——adapter manifest 配置，patch 零手工维护）
   const shouldShowTitleBar = uiConfig.titleBar ? (isMacOS ? showTitleBar : isWindows ? showTitleBar : true) : false;
   const isTitleBarHidden = uiConfig.titleBar && (isMacOS || isWindows) && !showTitleBar;
-  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : false;
+  const shouldPadTop = uiConfig.titleBar ? (shouldShowTitleBar || (isWindows && !showTitleBar)) : uiConfig.padTop;
   const SIDEBAR_LEFT = uiConfig.titleBar && isMacOS && !showTitleBar ? 10 : 15;
   const SIDEBAR_COLLAPSED_WIDTH = Math.round(((20 * 5) / 3) * 2);
 
