@@ -1,14 +1,14 @@
 {
   "adapterName": "chmlfrp-fnos-adapter",
-  "adapterVersion": "0.7.5-1.0.0",
-  "apiVersion": "1.0.0",
+  "adapterVersion": "0.7.5-1.1.0",
+  "apiVersion": "1.1.0",
   "upstream": {
     "repo": "TechCat-Team/ChmlFrpLauncher",
     "ref": "v0.7.5",
     "baseline": "0257a19",
     "commandSurface": 45
   },
-  "purpose": "连接上游 ChmlFrpLauncher v0.7.5 与 fnOS API 1.0.0。命令面跨 0.7.5/0.8.0 一致（diff 已验证），本 adapter 主要登记插件形态与 UI 适配点。",
+  "purpose": "adapter 是纯契约层（2026-08-16 用户决策定版）：只暴露标准化接口与配置，不含业务实现，不含 shim。所有 fnOS 版本差异——命令面、事件面、存储契约、UI 裁剪配置——由本 manifest 统一登记；mod 层（业务 + shim）按契约实现，patcher 层做前端开发。上游基线命令面跨 0.7.5/0.8.0 一致（diff 已验证）。",
 
   "capabilities": {
     "commands": {
@@ -35,19 +35,57 @@
         "hide_window", "show_window", "quit_app", "read_image_folder"
       ]
     },
-    "events": ["frpc-log", "download-progress", "tunnel-auto-restarted"],
+    "events": [
+      "frpc-log",
+      "download-progress",
+      "download-result",
+      "tunnel-auto-restarted"
+    ],
+    "httpApi": {
+      "description": "非 invoke 的 HTTP 面（daemon 静态托管前端，网关转发 /app/chmlfrp 前缀），B9 起更新下载异步化，网关只承担瞬时请求",
+      "endpoints": {
+        "GET /api/bootstrap": "首帧引导：版本 + 能力 + 聚合凭据快照（shim 版本比对自动刷新依赖其 version 字段）",
+        "POST /api/invoke": "命令分发（shim invoke 落点）",
+        "GET /ws/logs": "事件订阅（frpc-log/download-progress/download-result/tunnel-auto-restarted，断线指数退避重连 + 重放）",
+        "GET /api/update/check?force=1": "更新检查（5 分钟缓存；force=1 绕过——B10 修复二次检查误导文案）",
+        "POST /api/update/download": "异步下载：立即返回 ok，结果经 download-result 事件推送（B9 修复 fnOS 网关 504）",
+        "POST /api/update/apply": "应用 staging 更新包（校验版本不高于当前，防降级）"
+      }
+    },
+    "storage": {
+      "description": "存储契约（adapter 登记归属与权限，mod 层实现落盘；文件均 0600，daemon 进程所有者可写）",
+      "credential": {
+        "file": "credential.json",
+        "mode": "0600",
+        "commands": ["save_credential", "get_credential", "clear_credential", "credential_status"]
+      },
+      "nodeSettings": {
+        "file": "node_settings.json",
+        "mode": "0600",
+        "commands": ["get_node_settings", "set_node_settings"]
+      },
+      "frpcLog": {
+        "file": "frpc.log（轮转 .1）",
+        "mode": "0600",
+        "commands": ["clear_log_history"],
+        "note": "应用重启不丢（改进批 1 用户验收项）"
+      },
+      "background": {
+        "file": "background 图片/视频文件",
+        "mode": "0644",
+        "commands": ["copy_background_image", "copy_background_video", "save_background_image", "import_background_image_folder", "get_background_video_path"]
+      }
+    },
     "storageKeys": ["chmlfrp_user", "frpc_proxy_config", "frpcLogLevel", "bypassProxy", "restartOnEdit"],
     "plugins": ["dialog", "fs", "opener", "updater", "window", "app", "event"]
   },
 
   "uiFiles": {
-    "description": "上游 v0.7.5 需要 fnOS 版覆盖的文件（从当前 patcher 差异提取）",
+    "description": "上游 v0.7.5 需要 fnOS 版覆盖的文件（从当前 patcher 差异提取；uiCrop 归 adapter、featureBranch 归 mod）",
     "uiCrop": [
       "src/App.tsx",
       "src/components/pages/Settings/components/AppearanceSection.tsx",
-      "src/components/pages/Settings/components/SystemSection.tsx",
-      "src/components/dialogs/UpdateDialog.tsx",
-      "src/components/pages/Settings/index.tsx"
+      "src/components/pages/Settings/components/SystemSection.tsx"
     ],
     "featureBranch": [
       "src/components/pages/Settings/hooks/useBackgroundImage.ts",
@@ -60,7 +98,9 @@
       "src/services/frpcManager.ts",
       "src/lib/sound.ts",
       "src/services/api.ts",
-      "src/services/updateService.ts"
+      "src/services/updateService.ts",
+      "src/components/dialogs/UpdateDialog.tsx",
+      "src/components/pages/Settings/index.tsx"
     ],
     "total": 16
   },
@@ -68,10 +108,11 @@
   "uiCropPatch": "adapters/v0.7.5/ui-crop.patch",
 
   "uiConfig": {
-    "schemaVersion": 1,
-    "description": "fnOS UI 裁剪配置（patch 消费；false = 该 UI 元素在 fnOS 上隐藏）。统一格式由 adapter 包圆，patch 的 feat 增删只影响引用哪些配置项，不改格式。",
+    "schemaVersion": 2,
+    "description": "fnOS UI 裁剪配置（构建期由 generate-ui-config.mjs 生成 fnos-ui-config.ts，mod 的 feat 引用配置项；padding 已配置化——uiConfig.padTop 驱动，gen-patch 重新生成 crop 不会冲掉（根治二次回归））。",
     "values": {
       "titleBar": false,
+      "padTop": true,
       "antivirusWarningDialog": false,
       "autostart": false,
       "closeToTray": false,
@@ -83,8 +124,8 @@
     "rule": "adapterVersion = {上游基线版本}-{apiVersion} 联合版本号（adapter 声明自己基于哪个上游版本、适配哪个 API 版本）",
     "bump": {
       "baseline": "上游基线版本（随适配对象变，如 0.7.5 → 0.8.0）",
-      "api.major": "API 接口破坏性变更时",
-      "api.minor": "API 新增接口时",
+      "api.major": "API 接口破坏性变更时（契约面收窄/重定义）",
+      "api.minor": "API 新增接口/事件/配置项时（本版 1.0.0 → 1.1.0：加 download-result 事件、存储契约段、padTop 配置）",
       "api.patch": "本 adapter 修复（不影响 API 契约）"
     }
   }

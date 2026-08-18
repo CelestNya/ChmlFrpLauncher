@@ -232,14 +232,21 @@ pub async fn handle_apply(
     }
 }
 
-/// 下载镜像前缀（2026-08-17 用户反馈：下载实现线路优选与失败退避）。
+/// 下载镜像前缀（2026-08-17 引入线路优选与失败退避；2026-08-19 换血）。
 /// 空串 = 官方源（第一优先）；其余为国内可达的 GitHub 加速镜像。
-const MIRROR_PREFIXES: &[&str] = &[
-    "",
-    "https://ghproxy.com/",
-    "https://mirror.ghproxy.com/",
-    "https://gh-proxy.com/",
-];
+/// 实测（2026-08-18）：官方直连被墙（TCP 卡 30s+）；ghproxy.com / mirror.ghproxy.com
+/// 已死（DNS/证书均不可用）——已移除；gh-proxy.com 实测可用（~4MB/s）。
+const MIRROR_PREFIXES: &[&str] = &["", "https://gh-proxy.com/"];
+
+/// 每源连接超时（秒）：连接（send 阶段）独立限时，官方源被墙时 30s 即弃，
+/// 镜像 10s 快速失败，避免死源拖住整个下载过程（总请求超时由 client 120s 兜底）。
+fn source_connect_timeout(source_index: usize) -> u64 {
+    if source_index == 0 {
+        30
+    } else {
+        10
+    }
+}
 
 /// 由原始 URL 生成候选下载地址（官方 + 镜像）。
 fn mirror_urls(original: &str) -> Vec<String> {
@@ -258,25 +265,41 @@ async fn download_from_sources(
 ) -> Result<(Vec<u8>, u64), String> {
     let mut errors: Vec<String> = Vec::new();
     for (i, source) in sources.iter().enumerate() {
-        let resp = match client.get(source).send().await {
-            Ok(r) if r.status().is_success() => r,
-            Ok(r) => {
-                errors.push(format!("{source} 返回 {}", r.status()));
-                if i + 1 < sources.len() {
-                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        // 每源独立连接超时（官方 30s / 镜像 10s）：send() 限时连接+响应头，
+        // 失败即弃源换下一个；下载体受 client 总超时（120s）兜底
+        let send = match tokio::time::timeout(
+            std::time::Duration::from_secs(source_connect_timeout(i)),
+            client.get(source).send(),
+        )
+        .await
+        {
+            Ok(send_result) => match send_result {
+                Ok(r) => r,
+                Err(e) => {
+                    errors.push(format!("{source} 连接失败: {e}"));
+                    if i + 1 < sources.len() {
+                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    }
+                    continue;
                 }
-                continue;
-            }
-            Err(e) => {
-                errors.push(format!("{source} 连接失败: {e}"));
+            },
+            Err(_) => {
+                errors.push(format!("{source} 连接超时（>{}s）", source_connect_timeout(i)));
                 if i + 1 < sources.len() {
                     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                 }
                 continue;
             }
         };
-        let total = resp.content_length().unwrap_or(0);
-        let mut stream = resp.bytes_stream();
+        if !send.status().is_success() {
+            errors.push(format!("{source} 返回 {}", send.status()));
+            if i + 1 < sources.len() {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            }
+            continue;
+        }
+        let total = send.content_length().unwrap_or(0);
+        let mut stream = send.bytes_stream();
         let mut bytes: Vec<u8> = Vec::with_capacity(total.min(64 * 1024 * 1024) as usize);
         let mut downloaded: u64 = 0;
         let mut last_pct: u64 = 0;
@@ -794,13 +817,23 @@ mod tests {
         assert_eq!(last_pct, 100.0, "下载完成进度应为 100%");
     }
 
-    /// 镜像 URL 生成：官方第一优先 + 镜像前缀。
+    /// 镜像 URL 生成：官方第一优先 + 可用镜像（2026-08-19 换血：死源已移除）。
     #[test]
     fn 镜像候选生成_官方优先() {
         let candidates = mirror_urls("https://github.com/x/y.tgz");
         assert_eq!(candidates[0], "https://github.com/x/y.tgz", "官方源应第一优先");
-        assert!(candidates.iter().any(|c| c.starts_with("https://ghproxy.com/")), "应含 ghproxy 镜像");
-        assert!(candidates.len() >= 3);
+        assert!(
+            candidates.iter().any(|c| c.starts_with("https://gh-proxy.com/")),
+            "应含 gh-proxy.com 镜像（实测可用）"
+        );
+        assert!(
+            !candidates.iter().any(|c| c.contains("ghproxy.com")),
+            "死源 ghproxy.com / mirror.ghproxy.com 必须移除"
+        );
+        assert!(candidates.len() >= 2);
+        // 官方源连接超时 30s、镜像 10s
+        assert_eq!(source_connect_timeout(0), 30, "官方源被墙时 30s 即弃");
+        assert_eq!(source_connect_timeout(1), 10, "镜像 10s 快速失败");
     }
 
     // ---- B9：异步下载（网关 504 实测修复） ----
