@@ -67,6 +67,12 @@ fn bundled_frpc_candidates(app_handle: &tauri::AppHandle) -> Vec<PathBuf> {
 
     if let Ok(resource_dir) = app_handle.path().resource_dir() {
         candidates.push(resource_dir.join(file_name));
+        // Linux 上 `resource_dir()` 为 `/usr/lib/<productName>`，而打包器把
+        // `bundle.resources`（这里是 `resources/*`）铺在该目录之下，frpc 实际
+        // 位于 `<resource_dir>/resources/frpc`。此前只查 `<resource_dir>/frpc`，
+        // 候选路径全部落空，导致已在包内的 frpc 被判定为“未安装”并触发联网
+        // 重新下载。补上带 `resources/` 子目录的候选。
+        candidates.push(resource_dir.join("resources").join(file_name));
     }
 
     if let Ok(exe_path) = std::env::current_exe() {

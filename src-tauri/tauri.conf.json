@@ -37,6 +37,7 @@
     "createUpdaterArtifacts": true,
     "active": true,
     "targets": "all",
+    "category": "Network",
     "resources": ["resources/*"],
     "windows": {
       "wix": {
