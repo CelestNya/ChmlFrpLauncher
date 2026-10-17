@@ -1,16 +1,4 @@
 /* 毛玻璃效果 - 亮色模式 */
-/* 注意：blur 半径与 saturate 已从 24px/200% 下调。
- *
- * WebKitGTK 的 backdrop-filter 走 WebCore FilterOperation 管线，每个匹配元素
- * 都会生成独立的离屏缓冲并逐帧重算高斯模糊；匹配元素越多、半径越大，开销越高。
- * 上游原本对本文件下列所有选择器统一施加 blur(24px) saturate(200%)，
- * 在 KDE Wayland + NVIDIA 上会造成明显掉帧（Windows 的 WebView2 走
- * DirectComposition 硬件层，同样的 CSS 不构成瓶颈）。
- *
- * 调整原则：只对“面积较大的容器类元素”保留模糊，表单控件与小元素改为纯半透明，
- * 既维持毛玻璃观感，又把每帧的离屏缓冲数量与模糊半径降下来。
- */
-/* 模糊本身与 hover 无冲突，可常驻生效。 */
 .frosted-glass-enabled [data-slot="card"],
 .frosted-glass-enabled .border.rounded-lg.bg-card,
 .frosted-glass-enabled .bg-card,
@@ -20,47 +8,18 @@
 .frosted-glass-enabled [data-slot="context-menu-sub-content"],
 .frosted-glass-enabled .bg-sidebar,
 .frosted-glass-enabled .bg-background,
+.frosted-glass-enabled input,
+.frosted-glass-enabled textarea,
+.frosted-glass-enabled select,
 body:has(.frosted-glass-enabled) [data-slot="context-menu-content"],
 body:has(.frosted-glass-enabled) [data-slot="context-menu-sub-content"] {
-  backdrop-filter: blur(12px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(150%) !important;
-}
-
-/* 背景色与边框只在“非 hover”时施加，并保留 !important。
- *
- * 原因：Tailwind 的 hover 变体（如 button 的 hover:bg-accent）特异性为 (0,2,0)，
- * 而本文件的 .frosted-glass-enabled .bg-background 带 !important 时优先级无限高，
- * 会把 hover 的背景色一并覆盖掉，表现为“鼠标移入移出没有视觉反馈”。
- * 加上 :not(:hover) 后，hover 状态下本条规则不再匹配，Tailwind 的 hover 样式
- * 得以正常生效；非 hover 时仍由 !important 保证毛玻璃底色统一。
- */
-.frosted-glass-enabled [data-slot="card"]:not(:hover),
-.frosted-glass-enabled .border.rounded-lg.bg-card:not(:hover),
-.frosted-glass-enabled .bg-card:not(:hover),
-.frosted-glass-enabled [data-slot="popover"]:not(:hover),
-.frosted-glass-enabled .bg-popover:not(:hover),
-.frosted-glass-enabled [data-slot="context-menu-content"]:not(:hover),
-.frosted-glass-enabled [data-slot="context-menu-sub-content"]:not(:hover),
-.frosted-glass-enabled .bg-sidebar:not(:hover),
-.frosted-glass-enabled .bg-background:not(:hover),
-body:has(.frosted-glass-enabled) [data-slot="context-menu-content"]:not(:hover),
-body:has(.frosted-glass-enabled) [data-slot="context-menu-sub-content"]:not(:hover) {
   background-color: rgba(255, 255, 255, 0.45) !important;
-  border-color: rgba(255, 255, 255, 0.5) !important;
-}
-
-/* 表单控件：仅半透明，不做模糊（数量多、面积小，模糊收益极低而开销固定）；
- * 同样使用 :not(:hover) 以保留 focus/hover 反馈。 */
-.frosted-glass-enabled input:not(:hover),
-.frosted-glass-enabled textarea:not(:hover),
-.frosted-glass-enabled select:not(:hover) {
-  background-color: rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(24px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(200%) !important;
   border-color: rgba(255, 255, 255, 0.5) !important;
 }
 
 /* 毛玻璃效果 - 暗色模式 */
-/* 暗色模式：与亮色模式同样的降级策略（见上方说明） */
-/* 暗色模式：模糊常驻；背景色/边框只在非 hover 时施加（同亮色模式的说明） */
 .dark .frosted-glass-enabled [data-slot="card"],
 .dark .frosted-glass-enabled .border.rounded-lg.bg-card,
 .dark .frosted-glass-enabled .bg-card,
@@ -70,32 +29,14 @@ body:has(.frosted-glass-enabled) [data-slot="context-menu-sub-content"]:not(:hov
 .dark .frosted-glass-enabled [data-slot="context-menu-sub-content"],
 .dark .frosted-glass-enabled .bg-sidebar,
 .dark .frosted-glass-enabled .bg-background,
+.dark .frosted-glass-enabled input,
+.dark .frosted-glass-enabled textarea,
+.dark .frosted-glass-enabled select,
 .dark body:has(.frosted-glass-enabled) [data-slot="context-menu-content"],
 .dark body:has(.frosted-glass-enabled) [data-slot="context-menu-sub-content"] {
-  backdrop-filter: blur(12px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(150%) !important;
-}
-
-.dark .frosted-glass-enabled [data-slot="card"]:not(:hover),
-.dark .frosted-glass-enabled .border.rounded-lg.bg-card:not(:hover),
-.dark .frosted-glass-enabled .bg-card:not(:hover),
-.dark .frosted-glass-enabled [data-slot="popover"]:not(:hover),
-.dark .frosted-glass-enabled .bg-popover:not(:hover),
-.dark .frosted-glass-enabled [data-slot="context-menu-content"]:not(:hover),
-.dark .frosted-glass-enabled [data-slot="context-menu-sub-content"]:not(:hover),
-.dark .frosted-glass-enabled .bg-sidebar:not(:hover),
-.dark .frosted-glass-enabled .bg-background:not(:hover),
-.dark body:has(.frosted-glass-enabled) [data-slot="context-menu-content"]:not(:hover),
-.dark body:has(.frosted-glass-enabled) [data-slot="context-menu-sub-content"]:not(:hover) {
   background-color: rgba(15, 16, 20, 0.45) !important;
-  border-color: rgba(255, 255, 255, 0.2) !important;
-}
-
-/* 表单控件：暗色模式同样只做半透明，并保留 hover 反馈 */
-.dark .frosted-glass-enabled input:not(:hover),
-.dark .frosted-glass-enabled textarea:not(:hover),
-.dark .frosted-glass-enabled select:not(:hover) {
-  background-color: rgba(15, 16, 20, 0.45) !important;
+  backdrop-filter: blur(24px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(200%) !important;
   border-color: rgba(255, 255, 255, 0.2) !important;
 }
 
@@ -139,14 +80,14 @@ body:has(.frosted-glass-enabled) [data-slot="context-menu-sub-content"]:not(:hov
 .frosted-glass-enabled .bg-card\/95.backdrop-blur-md {
   z-index: 9999 !important;
   background: rgba(255, 255, 255, 0.98) !important;
-  backdrop-filter: blur(10px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(10px) saturate(140%) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
 }
 
 .dark .frosted-glass-enabled .bg-card\/95.backdrop-blur-md {
   background: rgba(15, 16, 20, 0.98) !important;
-  backdrop-filter: blur(10px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(10px) saturate(140%) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
 }
 
 /* 半透明效果 - 亮色模式 */
