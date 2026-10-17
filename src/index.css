@@ -539,3 +539,22 @@
   animation: none;
   mix-blend-mode: normal;
 }
+
+/* 头像图像的降采样与合成质量修正。
+ *
+ * 问题：用户头像通常来自接口的 640×640 原图，而侧栏里只显示 40×40，
+ * 需要 16 倍降采样。当头像位于带有 backdrop-filter 的容器内时（毛玻璃
+ * 模式的侧栏就带 backdrop-blur-md），WebKitGTK 会把整个子树先栅格化进
+ * 离屏层再二次采样，降采样与二次采样叠加导致头像明显发糊。
+ * Chromium 的实现会为子图层单独做高质量缩放，因此 Windows 上同样代码
+ * 不会出现该现象。
+ *
+ * 处理：为头像单独提层（will-change + translateZ），使其脱离父层栅格化，
+ * 并指定 -webkit-optimize-contrast 让缩放走较高质量的滤波。
+ */
+[data-slot="avatar-image"] {
+  image-rendering: -webkit-optimize-contrast;
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
