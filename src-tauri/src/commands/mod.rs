@@ -1,4 +1,5 @@
 pub mod autostart;
+pub mod avatar;
 pub mod background;
 pub mod custom_tunnel;
 pub mod download;
@@ -11,6 +12,7 @@ pub mod process_persistence;
 pub mod tray;
 
 pub use autostart::*;
+pub use avatar::*;
 pub use background::*;
 pub use custom_tunnel::*;
 pub use download::*;

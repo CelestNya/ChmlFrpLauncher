@@ -198,6 +198,7 @@ pub fn run() {
         .manage(FrpcProcesses::new())
         .manage(ProcessGuardState::new())
         .invoke_handler(tauri::generate_handler![
+            commands::fetch_avatar_sharp,
             commands::check_frpc_exists,
             commands::get_frpc_directory,
             commands::get_download_url,
