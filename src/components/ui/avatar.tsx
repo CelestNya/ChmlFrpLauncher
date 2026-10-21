@@ -21,52 +21,36 @@ function Avatar({
 }
 
 /**
- * 取回经 Rust 侧高质量缩放后的头像 dataURL。
+ * 把头像 URL 的尺寸参数改小后再交给 <img>。
  *
- * 背景：头像原图通常 640x640，界面只显示 40~44px，需 14~16 倍降采样。
- * WebKitGTK 的 <img> 在大比例降采样时滤波质量不足，细线条会被稀疏采样成
- * 暗色噪点；Chromium 实现更好，所以 Windows 上不明显。实测暗像素比例约
- * 1.9%，经 Rust 侧 Lanczos3 逐级减半后降到约 1.2%，且 CSS image-rendering
- * 无法改善该降采样路径。
+ * 背景：头像原图通常 640x640，界面只显示 40~44px，需要 15 倍以上降采样。
+ * WebKitGTK 的 <img> 在大比例降采样时滤波质量不足，细线条会被稀疏采样成暗色
+ * 噪点；Chromium 的实现更好，所以同样代码在 Windows 上噪点不明显。该问题不受
+ * CSS image-rendering 影响。
  *
- * 失败时回退原始 URL，保证头像至少能显示。
+ * 处理方式刻意保持最小：只把 URL 的 spec 参数从 640 改为 100（服务端支持按需
+ * 缩放），图片仍由服务端缩放成 JPEG、由浏览器原样加载，因此格式不变、浏览器
+ * HTTP 缓存照常生效（上游响应带 Cache-Control: max-age=30 天），本地不做任何
+ * 像素处理。
+ *
+ * 与上游的唯一差别就是这一个查询参数；若 URL 不含 spec 或解析失败，原样返回。
  */
-const avatarCache = new Map<string, string>();
-
-function useSharpenedAvatar(src: string | undefined): string | undefined {
+function useSmallerAvatarUrl(src: string | undefined): string | undefined {
   const [out, setOut] = React.useState<string | undefined>(src);
 
   React.useEffect(() => {
-    if (!src) {
-      setOut(undefined);
-      return;
-    }
-    if (!src.startsWith("http")) {
+    if (!src || !src.startsWith("http")) {
       setOut(src);
-      return;
-    }
-    const cached = avatarCache.get(src);
-    if (cached) {
-      setOut(cached);
       return;
     }
 
     let cancelled = false;
-    setOut(src);
-
-    invoke<{ data_url: string; width: number; height: number }>(
-      "fetch_avatar_sharp",
-      { url: src },
-    )
+    invoke<{ url: string }>("resolve_avatar_url", { url: src })
       .then((res) => {
-        if (cancelled) return;
-        if (res && res.data_url) {
-          avatarCache.set(src, res.data_url);
-          setOut(res.data_url);
-        }
+        if (!cancelled && res && res.url) setOut(res.url);
       })
       .catch(() => {
-        /* 静默回退到原图 */
+        if (!cancelled) setOut(src);
       });
 
     return () => {
@@ -82,7 +66,7 @@ function AvatarImage({
   src,
   ...props
 }: React.ComponentProps<typeof AvatarPrimitive.Image>) {
-  const sharpened = useSharpenedAvatar(
+  const resolved = useSmallerAvatarUrl(
     typeof src === "string" ? src : undefined,
   );
 
@@ -90,7 +74,7 @@ function AvatarImage({
     <AvatarPrimitive.Image
       data-slot="avatar-image"
       className={cn("aspect-square size-full", className)}
-      src={sharpened}
+      src={resolved}
       {...props}
     />
   );
