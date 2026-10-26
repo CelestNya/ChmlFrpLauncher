@@ -76,3 +76,12 @@ makepkg -si
 * push `arch-v*` tag → 构建 + 发 prerelease（prerelease 是为了不顶掉 fnOS 侧的
   Latest）。
 * `workflow_dispatch` → 只构建并上传 artifact，不发布。
+
+`.github/workflows/arch-upstream-follow.yml`：每天把上游 `develop` 合进
+`feat/linux-native-wayland-arch`，冲突则失败退出、不推送；合并成功后 dispatch
+一次 `arch-build.yml` 做构建验证。**不自动发 release** —— 发版仍靠手动打
+`arch-v*` tag。
+
+> 这两个文件在 `main` 上也有一份。GitHub 的 `schedule` 与 `workflow_dispatch`
+> 只认**默认分支**上的 workflow 文件，放在 feature 分支上永远触发不到。
+> main 上的副本只作入口，构建仍然 checkout `feat/linux-native-wayland-arch`。
