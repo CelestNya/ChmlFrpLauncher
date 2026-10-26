@@ -1,0 +1,115 @@
+name: Arch Upstream Follow
+
+# 把上游 TechCat-Team/ChmlFrpLauncher 的 develop 合进本 fork 的 Arch 分支，
+# 让 Arch 镜像包持续跟上上游的新特性与修复。
+#
+# 设计取舍：
+#   * 只做 merge + 推送 + 触发一次构建验证，**不自动发 release**。
+#     发版是有仪式感的事：上游每次提交都顶一个新包会让用户不断被要求升级，
+#     也会让 release 页面堆满无意义条目。发版仍然手动打 arch-v* tag。
+#   * 冲突时**失败退出、不推送**，而不是留下半成品分支。冲突点通常集中在
+#     src-tauri/src/main.rs 与 src-tauri/tauri.conf.json 这两个本 fork 也改过的
+#     文件上，需要人来判断。
+#   * 用 GITHUB_TOKEN 推送，因此这次 push 不会再触发其他 workflow
+#     （GitHub 的行为），最后显式 dispatch arch-build.yml 来做构建验证 ——
+#     workflow_dispatch 是 GITHUB_TOKEN 事件里少数仍能触发的类型。
+
+on:
+  schedule:
+    # 每天一次。上游节奏不是分钟级的，6 小时一次太吵。
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arch-upstream-follow
+  cancel-in-progress: false
+
+jobs:
+  follow:
+    name: Merge upstream develop
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout Arch branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/linux-native-wayland-arch
+          fetch-depth: 0
+          # 需要能推送，所以用 token 而不是默认的只读凭据。
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream develop
+        id: merge
+        run: |
+          set -euo pipefail
+
+          UPSTREAM=https://github.com/TechCat-Team/ChmlFrpLauncher.git
+          git remote add upstream "$UPSTREAM" 2>/dev/null || git remote set-url upstream "$UPSTREAM"
+          git fetch --no-tags upstream develop
+
+          BEFORE=$(git rev-parse HEAD)
+          BEHIND=$(git rev-list --count "$BEFORE"..upstream/develop)
+          echo "落后上游 develop $BEHIND 个提交"
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "已经是最新，无需合并。"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # --no-edit：默认 merge message 足够；冲突时 merge 不会完成，
+          # 下面立刻中止，保证分支状态不被弄脏。
+          if ! git merge --no-edit --no-ff upstream/develop; then
+            echo "::error::与上游 develop 合并冲突，需要人工处理。冲突文件："
+            git diff --name-only --diff-filter=U || true
+            git merge --abort
+            exit 1
+          fi
+
+          git log --oneline "$BEFORE"..HEAD
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push merged branch
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git push origin HEAD:feat/linux-native-wayland-arch
+
+      # 合并后立刻验证一次：merge 不冲突不代表能编译。
+      - name: Verify the merged branch still builds
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run arch-build.yml \
+            --repo "${{ github.repository }}" \
+            --ref feat/linux-native-wayland-arch
+          echo "已触发 arch-build.yml 做构建验证。"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Arch 分支上游跟随"
+            echo ""
+            if [ "${{ steps.merge.outputs.changed }}" = "true" ]; then
+              echo "已合并上游 develop（${{ steps.merge.outputs.behind }} 个提交）并推送。"
+              echo "已触发 arch-build.yml 做构建验证。"
+            else
+              echo "已是最新，本轮无改动。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

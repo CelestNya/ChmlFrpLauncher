@@ -55,8 +55,6 @@ jobs:
           set -euo pipefail
           useradd -m builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
-          mkdir -p /tmp/cargo-home /tmp/pnpm-data
-          chown -R builder:builder /tmp/cargo-home /tmp/pnpm-data
 
       - name: Cache cargo and pnpm
         uses: actions/cache@v4
@@ -67,6 +65,14 @@ jobs:
           key: arch-${{ hashFiles('pnpm-lock.yaml', 'src-tauri/Cargo.lock') }}
           restore-keys: |
             arch-
+
+      # 缓存恢复出来的文件属主是 root，必须在这一步之后再 chown，
+      # 否则 builder 用户写不进 CARGO_HOME，cache 命中反而会构建失败。
+      - name: Fix cache ownership
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cargo-home /tmp/pnpm-data
+          chown -R builder:builder /tmp/cargo-home /tmp/pnpm-data
 
       - name: Build package
         run: |
