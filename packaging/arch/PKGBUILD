@@ -1,0 +1,111 @@
+# Maintainer: CelestNya <celestnya@users.noreply.github.com>
+# Arch 镜像包：从本 fork 的 Linux 分支构建，跟随上游 develop 的特性与修复。
+# 上游：https://github.com/TechCat-Team/ChmlFrpLauncher  (Tauri 2 + React + Rust)
+
+pkgname=chmlfrp-launcher
+pkgver=0.8.0
+pkgrel=1
+pkgdesc="ChmlFrp 官方启动器，用于管理 ChmlFrp 内网穿透隧道"
+arch=('x86_64')
+url="https://github.com/TechCat-Team/ChmlFrpLauncher"
+license=('Apache-2.0')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg' 'openssl')
+makedepends=('rust' 'nodejs' 'pnpm' 'git')
+install="${pkgname}.install"
+
+# 只支持 x86_64：上游 src-tauri/frp-binaries 里随源码提交的内网穿透客户端
+# 只有 linux/amd64 一份（另有 windows/x64、macos/aarch64），没有 linux/aarch64，
+# 因此无法在 aarch64 上产出可用的包。
+
+# ---- 构建源 ---------------------------------------------------------------
+# 打包的是本 fork 的 Linux 分支（= 上游 develop 的全部特性 + Linux 适配）。
+# 默认跟随分支最新提交，符合「镜像包跟着上游走」的定位；要复现某个历史包时，
+# 用 _commit=<sha> 锁定，或者用 _repo=file:///path/to/checkout 直接打本地工作树。
+# CI 传 _commit=${GITHUB_SHA}，保证 release 产物与 tag 指向的提交严格一致。
+_repo="${_repo:-https://github.com/CelestNya/ChmlFrpLauncher.git}"
+_branch="${_branch:-feat/linux-native-wayland-arch}"
+_commit="${_commit:-}"
+
+if [[ -n $_commit ]]; then
+  source=("$pkgname::git+${_repo}#commit=${_commit}")
+else
+  source=("$pkgname::git+${_repo}#branch=${_branch}")
+fi
+sha256sums=('SKIP')
+
+# frpc 是 Go 静态二进制，strip 会削掉约 200 字节符号，使其与官方 CDN 分发
+# 文件不再逐字节相同（sha256 21916101c8d6602dbf8d1b2167f287b26af5dcb2fd07c522ea69deb0faf59b9f）；
+# 启动器首启会核对 hash，不匹配就判定文件异常并重新联网下载。
+# !lto：makepkg 默认把 -flto=auto 塞进 CFLAGS，cc-rs 会把它传给 ring 的
+# C/汇编源码，生成 LTO IR 后 rust-lld 无法解析，链接期炸成一片
+# "undefined symbol: ring_core_0_17_14__*"。
+options=('!strip' '!lto')
+
+pkgver() {
+  cd "$srcdir/$pkgname"
+  # 基准版本从源码树里读，不读 $pkgver：makepkg 可能对同一个 PKGBUILD
+  # 多次调用 pkgver()，读 $pkgver 会把 .rN.gHASH 后缀追加两遍
+  # （实测产出过 0.8.0.r267.g82433a0.r267.g82433a0）。从源码读则天然幂等，
+  # 且上游 bump 版本后这里自动跟上。
+  local basever
+  basever=$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n1)
+  printf '%s.r%s.g%s' "${basever:-0.0.0}" \
+    "$(git rev-list --count HEAD)" \
+    "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$srcdir/$pkgname"
+
+  # 只用发行版自带的 Rust，不额外下载 rustup 工具链。
+  export RUSTUP_TOOLCHAIN=stable
+
+  pnpm install --frozen-lockfile
+  # --no-bundle：AppImage/deb/rpm 由各自下游负责，Arch 侧只需要裸二进制。
+  pnpm tauri build --no-bundle
+}
+
+package() {
+  cd "$srcdir/$pkgname"
+
+  install -Dm755 src-tauri/target/release/ChmlFrpLauncher \
+    "$pkgdir/usr/bin/ChmlFrpLauncher"
+
+  install -Dm644 src-tauri/icons/128x128.png \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/chmlfrp-launcher.png"
+  install -Dm644 src-tauri/icons/32x32.png \
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/chmlfrp-launcher.png"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  # frpc 的落点必须与 Tauri 的 resource_dir() 对齐。
+  # Linux 上 resource_dir() = /usr/lib/<package_info.name>，而 bundle.resources
+  # ("resources/*") 会被原样铺在该目录之下 —— 即便是上游自己的 AppImage / deb，
+  # frpc 也在 /usr/lib/ChmlFrpLauncher/resources/frpc。
+  # 启动器按 resource_dir()/frpc、exe_dir/resources/frpc 等候选查找，因此两份都放：
+  # 一份对齐上游布局，一份放扁平路径兜底（本 fork 的候选表已含扁平路径）。
+  install -Dm755 src-tauri/resources/frpc \
+    "$pkgdir/usr/lib/ChmlFrpLauncher/resources/frpc"
+  install -Dm755 src-tauri/resources/frpc \
+    "$pkgdir/usr/lib/ChmlFrpLauncher/frpc"
+
+  cat > "$pkgname.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=ChmlFrp Launcher
+Name[zh_CN]=ChmlFrp 启动器
+Comment=ChmlFrp 内网穿透隧道管理工具
+Comment[zh_CN]=ChmlFrp 内网穿透隧道管理工具
+Exec=ChmlFrpLauncher %u
+Icon=chmlfrp-launcher
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=frp;tunnel;chmlfrp;内网穿透;
+StartupNotify=true
+StartupWMClass=ChmlFrpLauncher
+MimeType=x-scheme-handler/chmlfrp;
+EOF
+
+  install -Dm644 "$pkgname.desktop" \
+    "$pkgdir/usr/share/applications/$pkgname.desktop"
+}

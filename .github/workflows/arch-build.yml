@@ -1,0 +1,135 @@
+name: Arch Linux Package
+
+# 为 Arch 系发行版构建可安装的 .pkg.tar.zst（本 fork 的 Arch 镜像包）。
+#
+# 与既有 workflow 的边界：
+#   * fnos-build.yml 用 tag pattern `v*-*` 触发，只产 fnOS 的 .fpk；
+#     其注释写明「fork 不构建桌面版，latest 只有 fnOS release」。
+#   * release.yml（上游桌面版）在本 fork 已被改成仅 workflow_dispatch，
+#     不会产生抢占 releases/latest 的桌面 release。
+#   * 本 workflow 用独立前缀 `arch-v*`（不以 v 开头，既不匹配上游 `v*`
+#     也不匹配 fnOS 的 `v*-*`），并发布为 prerelease，双保险确保
+#     fnOS 的 release 继续持有 Latest。
+#
+# 触发：
+#   * push tag arch-v*：构建 + 发布（prerelease）。
+#   * workflow_dispatch：只构建并上传 artifact，不发布，用于验证改动。
+#
+# 为什么必须在 Arch 容器里构建：产物要链接 Arch 的 glibc / webkit2gtk-4.1。
+# 在 ubuntu runner 上交叉打出来的二进制，soname 与符号版本都对不上 Arch，
+# 装上去会直接起不来。
+
+on:
+  push:
+    tags:
+      - "arch-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-arch:
+    name: Arch package (x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    container:
+      image: archlinux:base-devel
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm --needed \
+            git rust nodejs pnpm \
+            webkit2gtk-4.1 gtk3 libayatana-appindicator librsvg openssl
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # makepkg 拒绝以 root 运行；cargo/pnpm 也需要可写的 HOME。
+      - name: Prepare build user
+        run: |
+          set -euo pipefail
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          mkdir -p /tmp/cargo-home /tmp/pnpm-data
+          chown -R builder:builder /tmp/cargo-home /tmp/pnpm-data
+
+      - name: Cache cargo and pnpm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /tmp/cargo-home
+            /tmp/pnpm-data
+          key: arch-${{ hashFiles('pnpm-lock.yaml', 'src-tauri/Cargo.lock') }}
+          restore-keys: |
+            arch-
+
+      - name: Build package
+        run: |
+          set -euo pipefail
+          cat > /tmp/build.sh <<SCRIPT
+          set -euo pipefail
+          export CARGO_HOME=/tmp/cargo-home
+          export XDG_DATA_HOME=/tmp/pnpm-data
+          export RUSTUP_TOOLCHAIN=stable
+          cd "${GITHUB_WORKSPACE}/packaging/arch"
+          # _repo 指向本次 checkout（file:// 远端），_commit 锁定到 tag 指向的提交：
+          # 包内容与 tag 严格一致，且不需要第二次联网克隆。
+          export _repo="file://${GITHUB_WORKSPACE}"
+          export _commit="${GITHUB_SHA}"
+          makepkg -f --nocheck
+          SCRIPT
+          chmod +x /tmp/build.sh
+          su builder -c 'bash /tmp/build.sh'
+
+      - name: Inspect package
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/packaging/arch"
+          PKG=$(ls -1 ./*.pkg.tar.zst | head -1)
+          {
+            echo "--- 元信息 ---"; pacman -Qip "$PKG"
+            echo "--- 文件清单 ---"; pacman -Qlp "$PKG"
+          } | tee /tmp/pkg-info.txt
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: packaging/arch/*.pkg.tar.zst
+          if-no-files-found: error
+
+  release-arch:
+    name: Publish Arch release
+    needs: build-arch
+    if: startsWith(github.ref, 'refs/tags/arch-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: arch-package
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          name: "Arch ${{ github.ref_name }}"
+          tag_name: ${{ github.ref_name }}
+          body: |
+            Arch Linux 安装包（x86_64），由本 fork 的 Linux 分支构建。
+
+            ```bash
+            sudo pacman -U chmlfrp-launcher-*.pkg.tar.zst
+            ```
+
+            本地重新构建：`cd packaging/arch && makepkg -si`
+          files: dist/*.pkg.tar.zst
