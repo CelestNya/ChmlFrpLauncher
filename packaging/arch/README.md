@@ -24,7 +24,13 @@ cd packaging/arch
 makepkg -si
 ```
 
-默认从本仓库的 `feat/linux-native-wayland-arch` 分支取指定 commit 构建。
+默认跟随本仓库 `feat/linux-native-wayland-arch` 分支的最新提交，符合「镜像包
+跟着上游走」的定位。要复现某个历史包，锁定提交：
+
+```bash
+_commit=<sha> makepkg -si
+```
+
 打本地工作树（含未提交改动）时用：
 
 ```bash

@@ -71,16 +71,18 @@ jobs:
       - name: Build package
         run: |
           set -euo pipefail
-          cat > /tmp/build.sh <<SCRIPT
+          # 写独立脚本再 su 执行：内联 su -c '...' 里的 heredoc 与变量展开
+          # 容易被外层 shell 提前吃掉，落到文件里最稳。
+          cat > /tmp/build.sh <<'SCRIPT'
           set -euo pipefail
           export CARGO_HOME=/tmp/cargo-home
           export XDG_DATA_HOME=/tmp/pnpm-data
           export RUSTUP_TOOLCHAIN=stable
-          cd "${GITHUB_WORKSPACE}/packaging/arch"
-          # _repo 指向本次 checkout（file:// 远端），_commit 锁定到 tag 指向的提交：
+          export _repo="file://$GITHUB_WORKSPACE"
+          export _commit="$GITHUB_SHA"
+          cd "$GITHUB_WORKSPACE/packaging/arch"
+          # _repo 指向本次 checkout（file:// 远端），_commit 锁定到触发构建的提交：
           # 包内容与 tag 严格一致，且不需要第二次联网克隆。
-          export _repo="file://${GITHUB_WORKSPACE}"
-          export _commit="${GITHUB_SHA}"
           makepkg -f --nocheck
           SCRIPT
           chmod +x /tmp/build.sh
@@ -122,7 +124,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           prerelease: true
-          name: "Arch ${{ github.ref_name }}"
+          name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
           body: |
             Arch Linux 安装包（x86_64），由本 fork 的 Linux 分支构建。
