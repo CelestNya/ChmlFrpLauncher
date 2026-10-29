@@ -86,8 +86,10 @@ package() {
   # 一份对齐上游布局，一份放扁平路径兜底（本 fork 的候选表已含扁平路径）。
   install -Dm755 src-tauri/resources/frpc \
     "$pkgdir/usr/lib/ChmlFrpLauncher/resources/frpc"
-  install -Dm755 src-tauri/resources/frpc \
-    "$pkgdir/usr/lib/ChmlFrpLauncher/frpc"
+  # 扁平路径只放软链接，不再复制第二份 13.6 MiB。
+  # resource_dir()/frpc 与 resource_dir()/resources/frpc 都能解析到同一个文件；
+  # .exists() 会跟随软链接，mode() 也跟随，触发不到 set_mode 分支。
+  ln -s resources/frpc "$pkgdir/usr/lib/ChmlFrpLauncher/frpc"
 
   cat > "$pkgname.desktop" <<'EOF'
 [Desktop Entry]
