@@ -61,7 +61,9 @@ jobs:
           cat > /tmp/build.sh <<'SCRIPT'
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/packaging/arch-bin"
-          makepkg -f
+          # --nodeps：本包不编译任何东西，depends 是纯运行时依赖（webkit2gtk 等），
+          # 容器里没必要为「重新归档一个现成 ELF」装一整套 GUI 栈。
+          makepkg -f --nodeps
           SCRIPT
           chmod +x /tmp/build.sh
           su builder -c 'bash /tmp/build.sh'
