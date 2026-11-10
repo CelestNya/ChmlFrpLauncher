@@ -1,0 +1,123 @@
+name: Arch Linux Package (binary)
+
+# 为 Arch 系发行版打包上游已发布的预编译二进制（-bin 镜像包）。
+#
+# 为什么是 -bin（与 arch-build.yml 的区别）：
+#   0.8.0 起上游把 frpc 内核静态链接进主程序，构建时要用
+#   `go build -buildmode=c-archive` 现场编译 src-tauri/frp/main.go，其依赖的
+#   TechCat-Team/frp 是私有仓库（上游 CI 用 secrets.CHMLFRP_SOURCE_TOKEN 检出）。
+#   公开环境拿不到这份源码，arch-build.yml 那条源码路线只适用于 0.8.0 之前。
+#   静态化之后上游发行包里只剩一个自包含 ELF，直接取其 .deb 内的二进制即可。
+#
+# 与既有 workflow 的边界：
+#   * fnos-build.yml 用 tag pattern `v*-*`，只产 fnOS 的 .fpk，持有 releases/latest。
+#   * arch-build.yml 用 `arch-v*`，是 0.8.0 之前的源码路线。
+#   * 本 workflow 用 `arch-bin-v*`，与上面两者都不相交，且发布为 prerelease，
+#     继续确保 fnOS 的 release 稳拿 Latest。
+#
+# 触发：
+#   * push tag arch-bin-v*：构建 + 发布（prerelease）。
+#   * workflow_dispatch：只构建并上传 artifact，不发布，用于验证改动。
+
+on:
+  push:
+    tags:
+      - "arch-bin-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-arch-bin:
+    name: Arch package (x86_64, upstream binary)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: archlinux:base-devel
+
+    steps:
+      # 不需要 rust / nodejs / pnpm：这里不编译，只重新归档上游产物。
+      - name: Install packaging tools
+        run: |
+          set -euo pipefail
+          pacman -Syu --noconfirm --needed base-devel libarchive
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # makepkg 拒绝以 root 运行。
+      - name: Prepare build user
+        run: |
+          set -euo pipefail
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: Build package
+        run: |
+          set -euo pipefail
+          cat > /tmp/build.sh <<'SCRIPT'
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/packaging/arch-bin"
+          makepkg -f
+          SCRIPT
+          chmod +x /tmp/build.sh
+          su builder -c 'bash /tmp/build.sh'
+
+      - name: Inspect package
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/packaging/arch-bin"
+          PKG=$(ls -1 ./*.pkg.tar.zst | head -1)
+          {
+            echo "--- 元信息 ---"; pacman -Qip "$PKG"
+            echo "--- 文件清单 ---"; pacman -Qlp "$PKG"
+          } | tee /tmp/pkg-info.txt
+
+          # 包内的二进制必须与上游 .deb 内的逐字节相同，否则说明打包环节
+          # 动了产物（strip / 重新链接），这会让「就是上游那一份」的承诺失效。
+          rm -rf /tmp/chk && mkdir -p /tmp/chk
+          bsdtar -xf "$PKG" -C /tmp/chk
+          sha256sum /tmp/chk/usr/bin/ChmlFrpLauncher
+          echo "上游 .deb 内二进制 sha256 应为:"
+          echo "  a6a7345b78634d039084bdf2aae631075b3caf406d20fdfa801e846c689e239c"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-bin-package
+          path: packaging/arch-bin/*.pkg.tar.zst
+          if-no-files-found: error
+
+  release-arch-bin:
+    name: Publish Arch binary release
+    needs: build-arch-bin
+    if: startsWith(github.ref, 'refs/tags/arch-bin-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: arch-bin-package
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          body: |
+            Arch Linux 安装包（x86_64），打包的二进制来自上游 ${{ github.ref_name }} 对应的 release。
+
+            ```bash
+            sudo pacman -U chmlfrp-launcher-bin-*.pkg.tar.zst
+            ```
+
+            本包提供并冲突 `chmlfrp-launcher`（源码包），两者不能同时安装。
+            卸载源码包后再装本包即可，用户数据（登录态、隧道配置）不随包卸载而删除。
+          files: dist/*.pkg.tar.zst

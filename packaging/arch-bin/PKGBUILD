@@ -1,0 +1,85 @@
+# Maintainer: CelestNya <celestnya@users.noreply.github.com>
+#
+# Arch 镜像包（-bin）：直接复用上游为 Debian 构建好的二进制，不重新编译。
+# 上游：https://github.com/TechCat-Team/ChmlFrpLauncher
+#
+# 为什么是 -bin 而不是源码包：
+#   0.8.0 起上游把内网穿透内核（frpc）改成静态链接进主程序，构建时需要用
+#   go build -buildmode=c-archive 现场编译 src-tauri/frp/main.go，而它依赖的
+#   TechCat-Team/frp 仓库是私有的（上游 CI 用 secrets.CHMLFRP_SOURCE_TOKEN 检出）。
+#   公开环境拿不到这份源码，源码构建路线到 0.8.0 为止就断了。
+#   好在静态化之后发行包里只剩一个自包含的 ELF，直接取上游 .deb 里的二进制即可。
+#
+# 与 AUR 惯例的差异：
+#   pkgver 跟上游 release 版本号一致（不带 .rN.gHASH），因为这里打包的是
+#   上游已经发过版、有明确版本号的构建产物，不是某个提交的快照。
+pkgname=chmlfrp-launcher-bin
+pkgver=0.8.0
+pkgrel=1
+pkgdesc="ChmlFrp 官方启动器（上游预编译二进制）"
+arch=('x86_64')
+url="https://github.com/TechCat-Team/ChmlFrpLauncher"
+license=('Apache-2.0')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'librsvg' 'hicolor-icon-theme')
+# 与源码包互斥：两者装的是同一个 /usr/bin/ChmlFrpLauncher，不能并存。
+# 也共用同一份用户数据 ~/.local/share/net.chmlfrp.launcher。
+provides=('chmlfrp-launcher')
+conflicts=('chmlfrp-launcher')
+install="${pkgname}.install"
+
+# 上游 .deb 是 ar 归档（debian-binary + control.tar.gz + data.tar.gz），
+# bsdtar（libarchive，base-devel 成员）能直接读 ar，所以不需要 dpkg。
+_deb="ChmlFrpLauncher_${pkgver}_amd64.deb"
+source=(
+  "${_deb}::https://github.com/TechCat-Team/ChmlFrpLauncher/releases/download/v${pkgver}/${_deb}"
+  "LICENSE::https://raw.githubusercontent.com/TechCat-Team/ChmlFrpLauncher/v${pkgver}/LICENSE"
+)
+sha256sums=('51e6cfc38f5387cfc50cea47a1269be99e56915ac026bd8e486c043d6bfb924a'
+            '382c0a82df3415c7782db9cc5c5f9b5ed91b7fbadfa0216be4938c91bf67acd5')
+
+# 装的是上游预编译好的 ELF，任何重写都会让它与上游 release 不再逐字节相同，
+# 也让「出问题时能证明二进制就是上游那一份」这件事失效。
+# !debug 同理：makepkg 默认会给可执行文件抽 .debug 文件。
+options=('!strip' '!debug')
+
+package() {
+  cd "$srcdir"
+
+  # 只取 data.tar.gz，control.tar.gz 里的元信息对 Arch 无用。
+  bsdtar -xf "${_deb}" data.tar.gz
+  bsdtar -xf data.tar.gz
+
+  install -Dm755 usr/bin/ChmlFrpLauncher "$pkgdir/usr/bin/ChmlFrpLauncher"
+
+  # 上游 .deb 里的图标文件名是 ChmlFrpLauncher.png；这里改名成与源码包一致的
+  # chmlfrp-launcher.png，两个包互相替换时桌面图标不会残留旧文件。
+  local size
+  for size in 256x256@2 128x128 32x32; do
+    install -Dm644 "usr/share/icons/hicolor/${size}/apps/ChmlFrpLauncher.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}/apps/chmlfrp-launcher.png"
+  done
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/${pkgname}/LICENSE"
+
+  # 不用上游自带的 .desktop：它的 Categories= 是空值，桌面环境无法分类，
+  # 且 Exec=ChmlFrpLauncher 不带 %u，chmlfrp:// 深链只会以裸参数形式传入。
+  cat > "${pkgname}.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=ChmlFrp Launcher
+Name[zh_CN]=ChmlFrp 启动器
+Comment=ChmlFrp 内网穿透隧道管理工具
+Comment[zh_CN]=ChmlFrp 内网穿透隧道管理工具
+Exec=ChmlFrpLauncher %u
+Icon=chmlfrp-launcher
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=frp;tunnel;chmlfrp;内网穿透;
+StartupNotify=true
+StartupWMClass=ChmlFrpLauncher
+MimeType=x-scheme-handler/chmlfrp;
+EOF
+
+  install -Dm644 "${pkgname}.desktop" \
+    "$pkgdir/usr/share/applications/chmlfrp-launcher.desktop"
+}
